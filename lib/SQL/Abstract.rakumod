@@ -1,5 +1,7 @@
 unit class SQL::Abstract;
 
+use fatal;
+
 enum Precedence <Rowlike Comma And Or Assignment Between In Prefix Comparative Additive Multiplicative Postfix Term>;
 
 multi prefix:<//>(Any $input) {
@@ -66,7 +68,10 @@ class Function does Expression {
 	method precedence(--> Precedence::Term) {}
 	has Str:D $.name is required;
 	has Expression @.arguments;
-	method new(Str $name, Expression @arguments) {
+	multi method new(Str $name, Expression $arguments) {
+		self.bless(:$name, :arguments[$arguments]);
+	}
+	multi method new(Str $name, Expression @arguments) {
 		self.bless(:$name, :@arguments);
 	}
 }
@@ -74,16 +79,17 @@ class Function does Expression {
 role Op does Expression {
 }
 
+role Op::Negatable does Op {
+	method negation(--> Op) { ... }
+}
 role Op::Unary does Op {
-	method precedence(--> Precedence::Term) {}
-	has Expression:D $.input is required;
-	method new(Expression $input) {
-		self.bless(:$input);
+	has Expression:D $.value is required;
+	method new(Expression $value) {
+		self.bless(:$value);
 	}
 }
 
-role Op::Unary::Postfix[Str $operator] does Op {
-	has Expression:D $.value is required;
+role Op::Unary::Postfix[Str $operator] does Op::Unary {
 	method precedence(--> Precedence::Postfix) {}
 	method postfix(--> Str) { $operator }
 	method new(Expression $value) {
@@ -91,16 +97,19 @@ role Op::Unary::Postfix[Str $operator] does Op {
 	}
 }
 
-class Op::IsNull does Op::Unary::Postfix['IS NULL'] {
+class Op::IsNotNull { ... }
+class Op::IsNull does Op::Unary::Postfix['IS NULL'] does Op::Negatable {
+	method negation() { Op::IsNotNull }
 }
-class Op::IsNotNull does Op::Unary::Postfix['IS NOT NULL'] {
+class Op::IsNotNull does Op::Unary::Postfix['IS NOT NULL'] does Op::Negatable {
+	method negation() { Op::IsNull }
 }
 
 class Op::Unary::Prefix does Op::Unary {
 	method precedence(--> Precedence::Prefix) {}
 	has Str:D $.operator is required;
-	method new(Str $operator, Expression $input) {
-		self.bless(:$operator, :$input);
+	method new(Str $operator, Expression $value) {
+		self.bless(:$operator, :$value);
 	}
 }
 
@@ -108,7 +117,7 @@ role Op::Binary does Op {
 	method operator() { ... }
 	has Expression:D $.left is required;
 	has Expression:D $.right is required;
-	method new(Expression $left, Expression $right) {
+	method new(Expression:D $left, Expression:D $right) {
 		self.bless(:$left, :$right);
 	}
 }
@@ -117,18 +126,56 @@ role Op::Comperative does Op::Binary {
 	method precedence(--> Precedence::Comparative) {}
 }
 
-class Op::Equals does Op::Comperative {
+class Op::Unequals { ... }
+class Op::Equals does Op::Comperative does Op::Negatable {
 	method operator(--> '=') {}
+	method negation(--> Op::Comperative) { Op::Unequals }
 }
-class Op::Unequals does Op::Comperative {
+class Op::Unequals does Op::Comperative does Op::Negatable {
 	method operator(--> '<>') {}
+	method negation(--> Op::Comperative) { Op::Equals }
 }
-class Op::Like does Op::Comperative {
+
+class Op::GreaterOrEqual { ... }
+class Op::LessThan does Op::Comperative does Op::Negatable {
+	method operator(--> '<') {}
+	method negation(--> Op::Comperative) { Op::GreaterOrEqual }
+}
+class Op::GreaterThan { ... }
+class Op::LessOrEqual does Op::Comperative does Op::Negatable {
+	method operator(--> '<=') {}
+	method negation(--> Op::Comperative) { Op::GreaterThan }
+}
+class Op::GreaterThan does Op::Comperative does Op::Negatable {
+	method operator(--> '>') {}
+	method negation(--> Op::Comperative) { Op::LessOrEqual }
+}
+class Op::GreaterOrEqual does Op::Comperative does Op::Negatable {
+	method operator(--> '>=') {}
+	method negation(--> Op::Comperative) { Op::LessThan }
+}
+
+class Op::Unlike { ... }
+class Op::Like does Op::Comperative does Op::Negatable {
 	method operator(--> 'LIKE') {}
+	method negation(--> Op::Unlike) { }
 }
-class Op::Unlike does Op::Comperative {
+class Op::Unlike does Op::Comperative does Op::Negatable {
 	method operator(--> 'NOT LIKE') {}
+	method negation(--> Op::Like) { }
 }
+
+my %binary-map =
+	'='        => Op::Equals,
+	'!='       => Op::Unequals,
+	'<>'       => Op::Unequals,
+	'<'        => Op::LessThan,
+	'<='       => Op::LessOrEqual,
+	'>'        => Op::GreaterThan,
+	'>='       => Op::GreaterOrEqual,
+	'like'     => Op::Like,
+	'not-like' => Op::Unlike;
+my $binary-like = any(%binary-map.keys);
 
 class Op::Comperative::Custom does Op::Comperative {
 	has Str:D $.operator is required;
@@ -153,8 +200,9 @@ role Op::Binary::Other[Precedence $precedence] does Op::Binary {
 class Op::Binary::Additive does Op::Binary::Other[Precedence::Additive] {
 }
 
-class Op::Between does Op {
+role Op::BetweenLike does Op does Op::Negatable {
 	method precedence(--> Precedence::Between) {}
+	method negated(--> Bool) { ... }
 	has Expression:D $.left is required;
 	has Expression:D $.min is required;
 	has Expression:D $.max is required;
@@ -163,13 +211,22 @@ class Op::Between does Op {
 	}
 }
 
+class Op::NotBetween { ... }
+class Op::Between does Op::BetweenLike {
+	method negated(--> False) { }
+	method negation() { Op::NotBetween }
+}
+class Op::NotBetween does Op::BetweenLike {
+	method negated(--> True) { }
+	method negation() { Op::Between }
+}
+
 role Op::List does Op {
 	has Expression @.elements is required;
 }
 
 role Op::Logical[Str $operator, Precedence $precedence] does Op::List {
 	method precedence(--> Precedence) { $precedence }
-	has Expression:D $.left is required;
 	method operator(--> Str) { $operator }
 	method new(@elements) {
 		self.bless(:@elements);
@@ -203,26 +260,30 @@ class Values {
 	}
 }
 
+my proto expand-source(Any $input) { * }
 role Source does Expression {
 	method precedence(--> Precedence::Rowlike) {}
+	method COERCE(Any $input) {
+		expand-source($input);
+	}
 }
 
 role Source::Singular does Source { }
 
 class Table does Source::Singular {
 	has Ident:D $.name is required;
-	method new(Ident:D(Cool:D) $name) {
+	method new(Ident(Cool:D) $name) {
 		self.bless(:$name);
 	}
 }
 
 role Renamed {
-	has Ident $.alias;
+	has Ident:D $.alias is required;
 }
 
 class Source::Renamed does Source does Renamed {
 	has Source::Singular:D $.source is required;
-	method new(Source::Singular $source, Ident:D(Cool:D) $alias) {
+	method new(Source::Singular $source, Ident(Cool:D) $alias) {
 		self.bless(:$source, :$alias);
 	}
 }
@@ -245,11 +306,11 @@ class Column::Named does Column does Sorter {
 class Column::Renamed does Column does Sorter does Renamed {
 	method precedence(--> Precedence::Comma) {}
 	has Column:D $.source is required;
-	multi method new(Column::Named(Cool) $column, Ident(Cool) $alias) {
-		self.bless(:$column, :$alias);
+	multi method new(Column::Named(Cool) $source, Ident(Cool) $alias) {
+		self.bless(:$source, :$alias);
 	}
-	multi method new(Column $column, Ident(Cool) $alias) {
-		self.bless(:$column, :$alias);
+	multi method new(Column $source, Ident(Cool) $alias) {
+		self.bless(:$source, :$alias);
 	}
 }
 
@@ -264,19 +325,27 @@ class Column::Expression does Column does Sorter {
 	}
 }
 
+my proto expand-columns(Any $columns) { * }
+class Columns {
+	has Column:D @.columns is required;
+	method new(@columns) {
+		self.bless(:@columns);
+	}
+	method COERCE(Any $columns) {
+		expand-columns($columns);
+	}
+}
+
 class Join does Source {
 	enum Type <Inner Left Right Outer>;
 	has Source:D $.left is required;
 	has Source:D $.right is required;
 	has Expression $.on;
-	has Column @.using;
+	has Columns $.using;
 	has Type:D $.type is required;
 	has Bool $.lateral;
-	multi method new(Table(Cool) $left, Table(Cool) $right, Column::Named(Cool:D) :$using!, Type :$type = Type::Inner, Bool :$lateral = False) {
-		self.bless(:$left, :$right, :using[$using], :$type, :$lateral);
-	}
-	multi method new(Table(Cool) $left, Table(Cool) $right, Column :@using!, Type :$type = Type::Inner, Bool :$lateral = False) {
-		self.bless(:$left, :$right, :@using, :$type, :$lateral);
+	multi method new(Table(Cool) $left, Table(Cool) $right, Columns(Any) :$using!, Type :$type = Type::Inner, Bool :$lateral = False) {
+		self.bless(:$left, :$right, :$using, :$type, :$lateral);
 	}
 	multi method new(Table(Cool) $left, Table(Cool) $right, Expression:D :$on!, Type :$type = Type::Inner, Bool :$lateral = False) {
 		self.bless(:$left, :$right, :$on, :$type, :$lateral);
@@ -298,35 +367,64 @@ class Sorter::Desc does Sorter::Modifier {
 	method modifier(--> 'DESC') {}
 }
 
+my proto expand-conditions(Any $condition) { * }
+class Conditions {
+	has Expression:D @.expressions is required;
+	method new(Expression @expressions) {
+		self.bless(:@expressions);
+	}
+	method COERCE(Any $condition) {
+		expand-conditions($condition);
+	}
+}
+
+my proto expand-sorters(Any $condition) { * }
+class Sorters {
+	has Sorter:D @.elems is required;
+	method new(@elems) {
+		self.bless(:@elems);
+	}
+	method COERCE(Any $elems) {
+		expand-sorters($elems);
+	}
+}
+
+class Rows {
+}
+
+class Set {
+	has Pair @.pairs;
+}
+
 class Select does Command does Expression {
-	has Column @.columns is required;
+	has Columns:D $.columns is required;
 	has Source $.source is required;
-	has Expression @.conditions;
-	has Column @.group-by;
-	has Expression @.having;
-	has Sorter @.order-by;
+	has Conditions $.conditions is required;
+	has Columns $.group-by;
+	has Conditions $.having is required;
+	has Sorters $.order-by;
 	has Int $.limit;
 	has Int $.offset;
 }
 
 class Insert does Command {
 	has Table:D $.target is required;
-	has Column @.fields;
+	has Columns $.fields;
 	has Row @.rows;
-	has Column @.returning;
+	has Columns $.returning;
 }
 
 class Update does Command {
 	has Table:D $.target is required;
-	has Pair @.set;
-	has Expression @.conditions;
-	has Column @.returning;
+	has Expression @.set;
+	has Conditions $.conditions;
+	has Columns $.returning;
 }
 
 class Delete does Command {
 	has Table:D $.target  is required;
-	has Expression @.conditions;
-	has Column @.returning;
+	has Conditions $.conditions;
+	has Columns $.returning;
 }
 
 my multi expand-expression(Expression $expression) {
@@ -345,81 +443,166 @@ my sub expand-row(@values) {
 	Row.new(@expanded);
 }
 
-my multi expand-condition(Column::Named $name, Expression:D $expression) {
-	Op::Equals.new($name, $expression);
-}
-my multi expand-condition(Column::Named $name, Any:D $value where Str|Numeric|Date|DateTime) {
-	Op::Equals.new($name, Value.new($value));
-}
-my multi expand-condition(Column::Named $name, Any:U) {
-	Op::IsNull.new($name);
-}
-my multi expand-condition(Column::Named $name, Pair $ (:$key where $key eq 'isnull', :$value)) {
-	Op::IsNull.new($name);
-}
-my multi expand-condition(Column::Named $name, Pair $ (:$key where $key eq 'isnotnull', :$value)) {
-	Op::IsNotNull.new($name);
-}
-my multi expand-condition(Column::Named $name, Pair $ (:$key where $key eq '=', :$value)) {
-	Op::Equals.new($name, expand-expression($value));
-}
-my multi expand-condition(Column::Named $name, Pair $ (:$key where $key eq '!=', :$value)) {
-	Op::Unequals.new($name, expand-expression($value));
-}
-my multi expand-condition(Column::Named $name, Pair $ (:$key where $key eq 'like', :$value)) {
-	Op::Like.new($name, expand-expression($value));
-}
-my multi expand-condition(Column::Named $name, Pair $ (:$key where $key eq 'not-like', :$value)) {
-	Op::Unlike.new($name, expand-expression($value));
-}
-my multi expand-condition(Column::Named $name, Pair $ (:$key, :$value)) {
-	Op::Comperative::Custom.new($key, $name, expand-expression($value));
-}
-my multi expand-condition(Column::Named $name, %hash) {
-	%hash.sort(*.key).map: { expand-condition($name, $^pair) };
-}
-my multi expand-condition(Column::Named $name, @list) {
-	@list.map: { expand-condition($name, $^elem) };
-}
-my multi expand-condition(Column::Named $name, Range $range) {
-	Op::Between.new($name, Value.new($range.min), Value.new($range.max));
-}
+subset Simple of Any where Str|Numeric|Bool|Date|DateTime;
 
-my multi expand-condition(Column::Named $name, Junction $junction) {
-	use nqp;
-	my $type = nqp::box_s(nqp::getattr($junction, Junction, '$!type'), Str);
-	my @eigenstates = nqp::getattr($junction, Junction, '$!eigenstates').List;
-	my Expression @values = @eigenstates.map(&expand-expression);
-	given $type {
-		when 'any' {
-			all(@values) ~~ Value ?? Op::In.new($name, @values) !! Op::Or.new(@values.map: { Op::Equals.new($name, $^expression) });
-		}
-		when 'all' {
-			Op::And.new(@values.map: { Op::Equals.new($name, $^expression) });
-		}
-		when 'none' {
-			all(@values) ~~ Value ?? Op::NotIn.new($name, @values) !! Op::And.new(@values.map: { Op::Unequals.new($name, $^expression) });
-		}
-		when 'one' {
-			my @comparisons = @values.map: { Op::Equals.new($name, $^value) };
-			my $addition = @comparisons.reduce: { Op::Binary::Additive.new('+', $^left, $^right) };
-			Op::Equals.new($addition, Value.new(1));
-		}
+role Partial {
+	method resolve(Column::Named:D $name) { ... }
+	method resolve-negated(Column::Named:D $name) {
+		my $positive = self.resolve($name);
+		Op::Unary::Prefix.new('NOT', $positive);
 	}
 }
 
-my multi expand-where(Expression $expression) {
-	$expression;
+class Partial::Unary does Partial {
+	has Op::Unary:U $.class is required;
+	method new(Op::Unary:U $class) {
+		self.bless(:$class);
+	}
+	method resolve(Column::Named:D $name) {
+		$!class.new($name);
+	}
+	method resolve-negated(Column::Named:D $name) {
+		$!class ~~ Op::Negatable ?? $!class.negation.new($name) !! nextsame;
+	}
 }
-my multi expand-where(@input) {
-	@input.map(&expand-expression);
+
+class Partial::Binary does Partial {
+	has Op::Binary:U $.class is required;
+	has Expression:D $.expression is required;
+	method new(Op::Binary:U $class, Expression:D $expression) {
+		self.bless(:$class, :$expression);
+	}
+	method resolve(Column::Named:D $name) {
+		$!class.new($name, $!expression);
+	}
+	method resolve-negated(Column::Named:D $name) {
+		$!class ~~ Op::Negatable ?? $!class.negation.new($name, $!expression) !! nextsame;
+	}
 }
-my multi expand-where(%hash) {
+
+class Partial::ListCompare does Partial {
+	has Op::ListCompare:U $.class is required;
+	has Value @.values is required;
+	method new(Op::ListCompare:U $class, @values) {
+		self.bless(:$class, :@values);
+	}
+	method resolve(Column::Named:D $name) {
+		$!class.new($name, @!values);
+	}
+	method resolve-negated(Column::Named:D $name) {
+		$!class ~~ Op::Negatable ?? $!class.negation.new($name, @!values) !! nextsame;
+	}
+}
+
+class Partial::Between does Partial {
+	has Op::BetweenLike:U $.class is required;
+	has Expression:D $.min is required;
+	has Expression:D $.max is required;
+	method new(Op::BetweenLike:U $class, Expression:D $min, Expression:D $max) {
+		self.bless(:$class, :$min, :$max);
+	}
+	method resolve(Column::Named:D $name) {
+		$!class.new($name, $!min, $!max);
+	}
+	method resolve-negated(Column::Named:D $name) {
+		$!class.negation.new($name, $!min, $!max);
+	}
+}
+
+class Partial::Custom does Partial {
+	has Code:D $.callback is required;
+	method new(Code:D $callback) {
+		self.bless(:$callback);
+	}
+	method resolve(Column::Named:D $name) {
+		$!callback($name);
+	}
+}
+
+my multi expand-partial(Expression:D $expression) {
+	Partial::Binary.new(Op::Equals, $expression);
+}
+my multi expand-partial(Simple:D $value) {
+	Partial::Binary.new(Op::Equals, Value.new($value));
+}
+my multi expand-partial(Any:U) {
+	Partial::Unary.new(Op::IsNull);
+}
+my multi expand-partial(Pair $ (:$key where $key eq 'isnull', :$value)) {
+	Partial::Unary.new(Op::IsNull);
+}
+my multi expand-partial(Pair $ (:$key where $key eq 'isnotnull', :$value)) {
+	Partial::Unary.new(Op::IsNotNull);
+}
+my multi expand-partial(Pair $ (:$key where $key eq $binary-like, :$value)) {
+	Partial::Binary.new(%binary-map{$key}, expand-expression($value));
+}
+my multi expand-partial(Pair $ (:$key, :$value)) {
+	my $expanded = expand-expression($value);
+	Partial::Custom.new: -> $name {
+		Op::Comperative::Custom.new($key, $name, $expanded);
+	}
+}
+my multi expand-partial(%hash) {
+	%hash.sort(*.key).map: { expand-partial($^pair) };
+}
+my multi expand-partial(Range $range) {
+	my $min = Value.new($range.min);
+	my $max = Value.new($range.max);
+	Partial::Between.new(Op::Between, $min, $max);
+}
+
+subset PartialEquals of Partial::Binary where .class ~~ Op::Equals;
+
+my multi expand-junction('any', @partials) {
+	Partial::Custom.new: -> $name { Op::Or.new(@partials.map(*.resolve($name))) };
+}
+my multi expand-junction('any', @partials where all(@partials) ~~ PartialEquals) {
+	Partial::ListCompare.new(Op::In, @partials».expression)
+}
+my multi expand-junction('all', @partials) {
+	Partial::Custom.new: -> $name { Op::And.new(@partials.map(*.resolve($name))) }
+}
+my multi expand-junction('none', @partials) {
+	Partial::Custom.new: -> $name { Op::And.new(@partials.map(*.resolve-negated($name))) };
+}
+my multi expand-junction('none', @partials where all(@partials) ~~ PartialEquals) {
+	Partial::ListCompare.new(Op::NotIn, @partials».expression);
+}
+my multi expand-junction('one', @partials) {
+	Partial::Custom.new: -> $name {
+		my @comparisons = @partials.map(*.resolve);
+		my $addition = @comparisons.reduce: { Op::Binary::Additive.new('+', $^left, $^right) };
+		Op::Equals.new($addition, Value.new(1));
+	}
+}
+
+my multi expand-partial(Junction $junction) {
+	use nqp;
+	my $type = nqp::box_s(nqp::getattr($junction, Junction, '$!type'), Str);
+	my @eigenstates = nqp::getattr($junction, Junction, '$!eigenstates').List;
+	expand-junction($type, @eigenstates.map(&expand-partial));
+}
+
+my sub expand-condition(Column::Named:D $name, Mu $value) {
+	my @partial = flat expand-partial($value);
+	@partial.map: { $^elem.resolve($name) };
+}
+
+my multi expand-conditions(Expression $expression) {
+	Conditions.new($expression);
+}
+my multi expand-conditions(@input) {
+	my Expression @expressions = @input.map(&expand-condition);
+	Conditions.new(@expressions);
+}
+my multi expand-conditions(%hash) {
 	my @expanded = flat %hash.kv.map: { $^key X=> expand-condition(Column::Named.new($^key), $^value) };
-	@expanded.sort(*.key).map(*.value);
+	my Expression @expressions = @expanded.sort(*.key).map(*.value);
+	Conditions.new(@expressions);
 }
-my multi expand-where(Any:U) {
-	();
+my multi expand-conditions(Any:U) {
+	Conditions.new; # XXX
 }
 
 my multi expand-column(Column $column) {
@@ -427,6 +610,9 @@ my multi expand-column(Column $column) {
 }
 my multi expand-column(Str $ident) {
 	Column::Named.new($ident);
+}
+my multi expand-column(Pair $ (:$key, :$value)) {
+	Column::Renamed.new(expand-column($key), $value);
 }
 my multi expand-column(Whatever) {
 	Column::All.new;
@@ -439,10 +625,13 @@ my multi expand-column(Any:U) {
 }
 
 my multi expand-columns($column) {
-	expand-column($column);
+	Columns.new(Array[Column].new(expand-column($column)));
 }
 my multi expand-columns(@list) {
-	@list.map(&expand-columns);
+	Columns.new(@list.map(&expand-column).list);
+}
+my multi expand-columns(%columns) {
+	Columns.new(%columns.sort(*.key).map(&expand-column));
 }
 
 my multi expand-sorter(Sorter $sorter) {
@@ -455,11 +644,25 @@ my multi expand-sorter(Any:U) {
 	();
 }
 
-my multi expand-sorters($sorter) {
-	expand-sorter($sorter);
+my multi expand-sorters(Any:D $sorter) {
+	Sorters.new(expand-sorter($sorter).list);
+}
+my multi expand-sorters(Any:U $sorter) {
+	Sorters;
 }
 my multi expand-sorters(@list) {
-	@list.map(&expand-sorter);
+	Sorter.new(@list.map(&expand-sorter));
+}
+
+my multi expand-source(Source $source) {
+	$source;
+}
+my multi expand-source(Pair $ (:$key, :$value)) {
+	my $source = expand-source($key);
+	Source::Renamed.new($source, $value);
+}
+my multi expand-source(Cool $pre-source) {
+	Table.new($pre-source);
 }
 
 role Generator {
@@ -470,42 +673,29 @@ role Generator {
 }
 
 class Generator::Default does Generator {
-	method select($pre-source, $columns = *, $conditions?, :$group-by, :$having, :$order-by, Int :$limit, Int :$offset) {
-		my Source $source = $pre-source ~~ Source ?? $pre-source !! Table.new($pre-source);
-		my @columns = expand-columns($columns);
-		my @conditions = expand-where($conditions);
-		my @group-by = $group-by ?? expand-columns($group-by) !! ();
-		my @having = $having ?? expand-where($having) !! ();
-		my @order-by = $order-by ?? expand-sorters($order-by) !! ();
-		Select.new(:@columns, :$source, :@conditions, :@group-by, :@having, :@order-by, :$limit, :$offset);
+	method select(Source(Any:D) $source, Columns(Any:D) $columns = *, Conditions(Any) $conditions?, Columns(Any) :$group-by, Conditions(Any) :$having?, Sorters(Any) :$order-by, Int :$limit, Int :$offset) {
+		Select.new(:$columns, :$source, :$conditions, :$group-by, :$having, :$order-by, :$limit, :$offset);
 	}
 
-	multi method insert(Table(Cool) $target, %values, :$returning) {
+	multi method insert(Table(Cool) $target, %values, Columns(Any) :$returning) {
 		my @pairs = %values.pairs.sort: *.key;
-		my @fields = @pairs».key.map: { Column::Named.new($^key) };
-		my Expression @values = @pairs».value.map: { expand-expression($^value) };
-		my @rows = Row.new(@values);
-		my @returning = expand-columns($returning);
-		Insert.new(:$target, :@fields, :@rows, :@returning);
+		my $fields = Columns.COERCE(@pairs».key);
+		my @rows = expand-row(@pairs».value);
+		Insert.new(:$target, :$fields, :@rows, :$returning);
 	}
-	multi method insert(Table(Cool) $target, @pre-fields, @pre-rows, :$returning) {
-		my @fields = @pre-fields.map: { $^field ~~ Column ?? $^field !! Column::Named.new($^field) };
+	multi method insert(Table(Cool) $target, Columns(Any) $fields, @pre-rows, Columns(Any) :$returning) {
 		my Row @rows = @pre-rows.map({ expand-row($^row) });
-		my @returning = expand-columns($returning);
-		Insert.new(:$target, :@fields, :@rows, :@returning);
+		Insert.new(:$target, :$fields, :@rows, :$returning);
 	}
 
-	method update(Table(Cool) $target, %set, $conditions?, :$returning) {
-		my @set = %set.kv.map: { $^key => Op::Assign.new(Column::Named.new($key), expand-expression($^value)) };
-		my @conditions = expand-where($conditions);
-		my @returning = expand-columns($returning);
-		Update.new(:$target, :@set, :@conditions, :@returning);
+	method update(Table(Cool) $target, %set, Conditions(Any) $conditions?, Columns(Any) :$returning) {
+		my @pairs = %set.pairs.sort(*.key);
+		my @set = @pairs.map: -> (:$key, :$value) { Op::Assign.new(Column::Named.new($key), expand-expression($value)) };
+		Update.new(:$target, :@set, :$conditions, :$returning);
 	}
 
-	method delete(Table(Cool) $target, $conditions?, :$returning) {
-		my @conditions = expand-where($conditions);
-		my @returning = expand-columns($returning);
-		Delete.new(:$target, :@conditions, :@returning);
+	method delete(Table(Cool) $target, Conditions(Any) $conditions?, Columns(Any) :$returning) {
+		Delete.new(:$target, :$conditions, :$returning);
 	}
 }
 
@@ -570,8 +760,8 @@ role Renderer::SQL does Renderer {
 		parenthesize-maybe($value ~ ' ' ~ $op.postfix, $precedence > Precedence::Postfix);
 	}
 	multi method render-expression(Arguments $arguments, Op::Unary::Prefix $op, Precedence $precedence --> Str) {
-		my $primary = self.render-expression($arguments, $op.primary, Precedence::Prefix);
-		parenthesize-maybe($op.operator ~ ' ' ~ $primary, $precedence > $Precedence::Prefix);
+		my $primary = self.render-expression($arguments, $op.value, Precedence::Prefix);
+		parenthesize-maybe($op.operator ~ ' ' ~ $primary, $precedence > Precedence::Prefix);
 	}
 	multi method render-expression(Arguments $arguments, Op::Binary $op, Precedence $precedence --> Str) {
 		my $left = self.render-expression($arguments, $op.left, $op.precedence);
@@ -583,11 +773,13 @@ role Renderer::SQL does Renderer {
 		my $candidates = self.render-list($arguments, $in.elements, True);
 		parenthesize-maybe("$left $in.operator() $candidates", $precedence > $in.precedence);
 	}
-	multi method render-expression(Arguments $arguments, Op::Between $between, Precedence $precedence --> Str) {
+	multi method render-expression(Arguments $arguments, Op::BetweenLike $between, Precedence $precedence --> Str) {
 		my $left = self.render-expression($arguments, $between.left, Precedence::Between);
 		my $min = self.render-expression($arguments, $between.min, Precedence::Between);
 		my $max = self.render-expression($arguments, $between.max, Precedence::Between);
-		parenthesize-maybe("$left BETWEEN $min AND $max", $precedence > Precedence::Between);
+		my $not = $between.negated ?? 'NOT' !! '';
+		my $base = join-elems($left, $not, 'BETWEEN', $min, 'AND', $max);
+		parenthesize-maybe($base, $precedence > Precedence::Between);
 	}
 	method render-sub-expression(Arguments $arguments, Expression $element, Precedence $precedence --> Str) {
 		self.render-expression($arguments, $element, $precedence);
@@ -610,7 +802,7 @@ role Renderer::SQL does Renderer {
 		self.render-identifier($column.ident);
 	}
 	multi method render-column(Arguments $arguments, Column::Renamed $column --> Str) {
-		my $source = self.render-column($column.source);
+		my $source = self.render-column($arguments, $column.source);
 		my $alias = self.render-identifier($column.alias);
 		"$source AS $alias";
 	}
@@ -619,8 +811,8 @@ role Renderer::SQL does Renderer {
 		self.render-expression($arguments, $column.expression, Precedence::Comma);
 	}
 
-	method render-columns(Arguments $arguments, Column @columns, Bool $parenthesized = False --> Str) {
-		my @elems = @columns.map: { self.render-column($arguments, $^column) };
+	method render-columns(Arguments $arguments, Columns $columns, Bool $parenthesized = False --> Str) {
+		my @elems = $columns.columns.map: { self.render-column($arguments, $^column) };
 		parenthesize-maybe(@elems.join(', '), $parenthesized);
 	}
 
@@ -652,7 +844,7 @@ role Renderer::SQL does Renderer {
 		my $type = $join.type.uc;
 		my $lateral = $join.lateral ?? 'LATERAL' !! '';
 		my $on = $join.on    ?? 'ON ' ~ self.render-expression($arguments, $join.on, Precedence::Comma)
-		    !!   $join.using ?? 'USING ' ~ self.render-columns($arguments, $join.using, True) 
+		    !!   $join.using ?? 'USING ' ~ self.render-columns($arguments, $join.using, True)
 		    !!                  '';
 		join-elems($left, $type, 'JOIN', $lateral, $right, $on);
 	}
@@ -662,35 +854,39 @@ role Renderer::SQL does Renderer {
 		'VALUES ' ~ @sets.join(', ');
 	}
 
-	multi method render-where(Arguments $arguments, Expression @conditions --> Str) {
+	multi method render-conditions(Arguments $arguments, Conditions:D $conditions, Str $type = 'WHERE' --> Str) {
+		my @conditions = $conditions.expressions;
 		my $expression = @conditions > 1 ?? Op::And.new(@conditions) !! @conditions[0];
-		'WHERE ' ~ self.render-expression($arguments, $expression, Precedence::And);
+		"$type " ~ self.render-expression($arguments, $expression, Precedence::And);
 	}
-	multi method render-where(Arguments $arguments, Expression @conditions where @conditions == 0 --> Str) {
+	multi method render-conditions(Arguments $arguments, Conditions:D $conditions where $conditions.expressions == 0, Str $type = Str --> Str) {
+		'';
+	}
+	multi method render-conditions(Arguments $arguments, Conditions:U $conditions, Str $type = Str --> Str) {
 		'';
 	}
 
-	multi method render-order-by(Arguments $arguments, Sorter:D @sorters --> Str) {
-		my @elems = @sorters.map: { self.render-sorter($arguments, $^column) };
+	multi method render-order-by(Arguments $arguments, Sorters:D $sorters --> Str) {
+		my @elems = $sorters.elems.map: { self.render-sorter($arguments, $^column) };
 		'ORDER BY ' ~ @elems.join(', ');
 	}
-	multi method render-order-by(Arguments $arguments, Sorter:D @sorters where @sorters == 0 --> Str) {
+	multi method render-order-by(Arguments $arguments, Sorters:U $sorters --> Str) {
 		''
 	}
 
-	multi method render-group-by(Arguments $arguments, Column:D @columns, Expression @having --> Str) {
-		my $group-by = self.render-columns($arguments, @columns);
-		my $having = self.render-where($arguments, @having).subst(/^WHERE/, 'HAVING');
+	multi method render-group-by(Arguments $arguments, Columns:D $columns, Conditions $conditions --> Str) {
+		my $group-by = self.render-columns($arguments, $columns);
+		my $having = self.render-conditions($arguments, $conditions, 'HAVING');
 		join-elems('GROUP BY', $group-by, $having);
 	}
-	multi method render-group-by(Arguments $arguments, Column:D @columns where @columns == 0, Expression @having --> Str) {
+	multi method render-group-by(Arguments $arguments, Columns:U $columns, Conditions $having --> Str) {
 		''
 	}
 
-	multi method render-returning(Arguments $arguments, Column:D @returning --> Str) {
-		'RETURNING ' ~ self.render-columns($arguments, @returning);
+	multi method render-returning(Arguments $arguments, Columns:D $returning --> Str) {
+		'RETURNING ' ~ self.render-columns($arguments, $returning);
 	}
-	multi method render-returning(Arguments $arguments, Column:D @returning where @returning == 0 --> Str) {
+	multi method render-returning(Arguments $arguments, Columns:U $returning --> Str) {
 		'';
 	}
 
@@ -704,7 +900,7 @@ role Renderer::SQL does Renderer {
 	multi method render-command-expression(Arguments $arguments, Select $select --> Str) {
 		my $columns    = self.render-columns($arguments, $select.columns);
 		my $source     = self.render-source($arguments, $select.source);
-		my $conditions = self.render-where($arguments, $select.conditions);
+		my $conditions = self.render-conditions($arguments, $select.conditions);
 		my $group-by   = self.render-group-by($arguments, $select.group-by, $select.having);
 		my $order-by   = self.render-order-by($arguments, $select.order-by);
 		my $limit      = self.render-limit($select.limit, $select.offset);
@@ -713,9 +909,9 @@ role Renderer::SQL does Renderer {
 
 	multi method render-command-expression(Arguments $arguments, Update $update --> Str) {
 		my $target      = self.render-table($update.target);
-		my @expressions = $update.set.sort(*.key).map(*.value);
+		my @expressions = $update.set;
 		my $set         = self.render-list($arguments, @expressions, False);
-		my $conditions  = self.render-where($arguments, $update.conditions);
+		my $conditions  = self.render-conditions($arguments, $update.conditions);
 		my $returning   = self.render-returning($arguments, $update.returning);
 		join-elems('UPDATE', $target, 'SET', $set, $conditions, $returning);
 	}
@@ -730,7 +926,7 @@ role Renderer::SQL does Renderer {
 
 	multi method render-command-expression(Arguments $arguments, Delete $delete --> Str) {
 		my $target = self.render-table($delete.target);
-		my $conditions = self.render-where($arguments, $delete.conditions);
+		my $conditions = self.render-conditions($arguments, $delete.conditions);
 		my $returning = self.render-returning($arguments, $delete.returning);
 		join-elems('DELETE FROM', $target, $conditions, $returning);
 	}

@@ -21,11 +21,48 @@ is-deeply $select-simple5, ('SELECT bar, baz FROM foo WHERE foo IS NULL', []);
 my $select-simple6 = $abstract.select('foo', <bar baz>, { :foo('<' => 3) });
 is-deeply $select-simple6, ('SELECT bar, baz FROM foo WHERE foo < $1', [3]);
 
+my $select-simple7 = $abstract.select('foo', <bar baz>, { :foo{ '<' => 3, '>' => 0 } });
+is-deeply $select-simple7, ('SELECT bar, baz FROM foo WHERE foo < $1 AND foo > $2', [3, 0]);
+
+my $select-type1 = $abstract.select('foo', <bar baz>, { :foo });
+is-deeply $select-type1, ('SELECT bar, baz FROM foo WHERE foo = $1', [ True ]);
+
+my $now = DateTime.now;
+my $select-type2 = $abstract.select('foo', <bar baz>, { :foo('<' => $now) });
+is-deeply $select-type2, ('SELECT bar, baz FROM foo WHERE foo < $1', [ $now ]);
+
+my $select-type3 = $abstract.select('foo', <bar baz>, { :foo(1..42) });
+is-deeply $select-type3, ('SELECT bar, baz FROM foo WHERE foo BETWEEN $1 AND $2', [ 1, 42 ]);
+
+my $select-rename1 = $abstract.select('foo', (:bar<baz>), { :foo('<' => 3) });
+is-deeply $select-rename1, ('SELECT bar AS baz FROM foo WHERE foo < $1', [3]);
+
+my $select-rename2 = $abstract.select('foo', { :bar<baz> }, { :foo('<' => 3) });
+is-deeply $select-rename2, ('SELECT bar AS baz FROM foo WHERE foo < $1', [3]);
+
+my $select-rename3 = $abstract.select((:foo<quz>), <bar baz>, { :foo(Any) });
+is-deeply $select-rename3, ('SELECT bar, baz FROM foo quz WHERE foo IS NULL', []);
+
 my $select-junction1 = $abstract.select('foo', <bar baz>, { :foo(1|2|4) });
 is-deeply $select-junction1, ('SELECT bar, baz FROM foo WHERE foo IN ($1, $2, $3)', [1, 2, 4]);
 
 my $select-junction2 = $abstract.select('foo', <bar baz>, { :foo(none(1, 2, 4)) });
 is-deeply $select-junction2, ('SELECT bar, baz FROM foo WHERE foo NOT IN ($1, $2, $3)', [1, 2, 4]);
+
+my $select-junction3 = $abstract.select('foo', <bar baz>, { :foo(any('=' => 1, '=' => 2, '=' => 4)) });
+is-deeply $select-junction3, ('SELECT bar, baz FROM foo WHERE foo IN ($1, $2, $3)', [1, 2, 4]);
+
+my $select-junction4 = $abstract.select('foo', <bar baz>, { :foo(none('=' => 1, '=' => 2, '=' => 4)) });
+is-deeply $select-junction4, ('SELECT bar, baz FROM foo WHERE foo NOT IN ($1, $2, $3)', [1, 2, 4]);
+
+my $select-junction5 = $abstract.select('foo', <bar baz>, { :foo(any('=' => 1, '>' => 4)) });
+is-deeply $select-junction5, ('SELECT bar, baz FROM foo WHERE foo = $1 OR foo > $2', [1, 4]);
+
+my $select-junction6 = $abstract.select('foo', <bar baz>, { :foo(none('<' => 1, '>' => 2)) });
+is-deeply $select-junction6, ('SELECT bar, baz FROM foo WHERE foo >= $1 AND foo <= $2', [1, 2]);
+
+my $select-junction7 = $abstract.select('foo', <bar baz>, { :foo(none(1..42, Empty)) });
+is-deeply $select-junction7, ('SELECT bar, baz FROM foo WHERE foo NOT BETWEEN $1 AND $2', [1, 42]);
 
 my $select-named1 = $abstract.select('foo', <bar baz>, { :1foo }, :order-by<bar>);
 is-deeply $select-named1, ('SELECT bar, baz FROM foo WHERE foo = $1 ORDER BY bar', [1]);
