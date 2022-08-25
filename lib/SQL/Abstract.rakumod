@@ -800,9 +800,10 @@ class Delete { ... }
 
 class Table is Source {
 	has Ident:D $.name is required handles<Str>;
+	has Bool    $.only;
 
-	method new(Ident(Cool:D) $name) {
-		self.bless(:$name);
+	method new(Ident(Cool:D) $name, Bool :$only) {
+		self.bless(:$name, :$only);
 	}
 
 	multi method update(Assigns:D(Any:D) $set, Conditions(Any) $where?, *%arguments) {
@@ -969,7 +970,7 @@ role Keyword does Expression {
 
 class Common { ... }
 
-role Command does Keyword {
+role Keyword::Common does Keyword {
 	has Common(Any)      $.common-tables;
 }
 
@@ -981,11 +982,11 @@ class Values does Keyword {
 }
 
 class SubQuery is Source {
-	has Command:D       $.command is required;
-	has Table:D(Cool:D) $.alias is required;
+	has Keyword::Common:D $.keyword is required;
+	has Table:D(Cool:D)   $.alias is required;
 
-	method new(Command:D $command, Table:D(Cool:D) $alias) {
-		self.bless(:$command, :$alias);
+	method new(Keyword::Common:D $keyword, Table:D(Cool:D) $alias) {
+		self.bless(:$keyword, :$alias);
 	}
 }
 
@@ -1037,7 +1038,7 @@ class Distinct::Expressions is Distinct {
 	
 }
 
-class Select does Command does Expression {
+class Select does Keyword::Common does Expression {
 	has Column::Expressions:D(Any:D) $.columns is required;
 	has Distinct(Any)    $.distinct;
 	has Source:D(Any:D)  $.source is required;
@@ -1100,7 +1101,7 @@ class Conflict::Update is Conflict {
 	}
 }
 
-role Insert does Command {
+role Insert does Keyword::Common {
 	has Table:D(Cool:D)    $.target is required;
 	has Table(Cool)        $.as;
 	has Column::Names(Any) $.fields;
@@ -1119,7 +1120,7 @@ class Insert::Select does Insert {
 	has Select:D $.select is required;
 }
 
-role Update does Command {
+role Update does Keyword::Common {
 	has Table:D(Cool:D)   $.target is required;
 	has Bool              $.only;
 	has Table(Cool)       $.as;
@@ -1142,7 +1143,7 @@ class Update::Select does Update {
 	has Select:D             $.select is required;
 }
 
-class Delete does Command {
+class Delete does Keyword::Common {
 	has Table:D(Cool:D) $.target is required;
 	has Bool            $.only;
 	has Table(Cool)     $.as;
@@ -1319,8 +1320,8 @@ class Renderer::SQL does Renderer {
 		my @elems = $logical.elements.map: { self.render-expression($placeholders, $^element, $logical.precedence) };
 		@elems.join(" $logical.operator() ");
 	}
-	multi method render-expression(Placeholders $placeholders, Command $command, Precedence $outer --> Str) {
-		self.render-keyword-expression($placeholders, $command);
+	multi method render-expression(Placeholders $placeholders, Keyword $keyword, Precedence $outer --> Str) {
+		self.render-keyword-expression($placeholders, $keyword);
 	}
 
 	multi method render-distinct(Placeholders $placeholders, Distinct::Expressions:D $source) {
@@ -1373,7 +1374,8 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-source(Placeholders $, Table $table --> Str) {
-		self.render-table($table);
+		my $name = self.render-table($table);
+		$table.only ?? "ONLY $name" !! $name;
 	}
 	multi method render-source(Placeholders $placeholders, SubQuery $query --> Str) {
 		my $rendered = self.render-keyword-expression($placeholders, $query.query);
@@ -1643,9 +1645,9 @@ class Renderer::SQL does Renderer {
 		('VALUES', $rows, @order-by, @limits).flat.join(' ');
 	}
 
-	method render-keyword(Command $command) {
+	method render-keyword(Keyword $keyword) {
 		my $placeholders = self.placeholders.new;
-		my $sql          = self.render-keyword-expression($placeholders, $command);
+		my $sql          = self.render-keyword-expression($placeholders, $keyword);
 		$sql, $placeholders.values;
 	}
 }
