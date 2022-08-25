@@ -2,9 +2,10 @@ unit class SQL::Abstract;
 
 use fatal;
 
-enum Precedence <Rowlike Comma Not And Or Assignment Between In Prefix Comparative Additive Multiplicative Postfix TermLike>;
+enum Precedence <Rowlike Comma Not And Or Assignment Between In LoosePrefix Postfix Comparative Additive Multiplicative Concatlike TightPrefix Termlike>;
 
 class Op::Unary::Not { ... }
+
 role Expression {
 	method precedence(--> Precedence) { ... }
 
@@ -14,11 +15,11 @@ role Expression {
 }
 
 role Term does Expression {
-	method precedence(--> Precedence::TermLike) {}
+	method precedence(--> Precedence::Termlike) {}
 }
 
 class Literal does Expression {
-	has Precedence $.precedence = Precedence::TermLike;
+	has Precedence $.precedence = Precedence::Termlike;
 	has Str:D $.payload is required;
 	has Any:D @.arguments;
 
@@ -27,7 +28,18 @@ class Literal does Expression {
 	}
 }
 
-class Value does Term {
+role Value does Term {
+}
+
+class Integer does Value {
+	has Int $.value;
+
+	method new(Int $value) {
+		self.bless(:$value);
+	}
+}
+
+class Placeholder does Value {
 	has Any $.value;
 
 	method new(Any $value) {
@@ -54,7 +66,7 @@ my multi expand-expression(Expression $expression) {
 	$expression;
 }
 my multi expand-expression(Any:D $value) {
-	Value.new($value);
+	Placeholder.new($value);
 }
 my multi expand-expression(Capture $literal) {
 	my ($sql, @arguments) = |$literal;
@@ -73,7 +85,12 @@ class Ident {
 		self.bless(:@parts);
 	}
 
-	sub quote(Str $part) {
+	method concat(Ident:D $other) {
+		my @merged = |@!parts, |$other.parts;
+		self.new(@merged);
+	}
+
+	my sub quote(Str $part) {
 		'"' ~ $part.subst('"', '""', :g) ~ '"';
 	}
 	method Str() {
@@ -89,12 +106,13 @@ class Row does Expression {
 
 	has Expression @.elements;
 
-	method new(@elements) {
+	method new(Expression @elements) {
 		self.bless(:@elements);
 	}
 
 	method COERCE(@values) {
-		Row.new(@values».&expand-expression);
+		my Expression @expressions = @values».&expand-expression;
+		Row.new(@expressions);
 	}
 }
 
@@ -144,12 +162,17 @@ class Op::IsNotNull does Op::Unary::Postfix['IS NOT NULL'] {
 	}
 }
 
-role Op::Unary::Prefix does Op::Unary {
-	method precedence(--> Precedence::Prefix) {}
+role Op::Unary::Prefix::Loose does Op::Unary {
+	method precedence(--> Precedence::LoosePrefix) {}
 	method operator(--> Str:D) { ... }
 }
 
-class Op::Unary::Not does Op::Unary::Prefix {
+role Op::Unary::Prefix::Tight does Op::Unary {
+	method precedence(--> Precedence::TightPrefix) {}
+	method operator(--> Str:D) { ... }
+}
+
+class Op::Unary::Not does Op::Unary::Prefix::Loose {
 	method precedence(--> Precedence::Not) {}
 	method operator(--> 'NOT') { ... }
 
@@ -169,6 +192,14 @@ role Op::Binary does Expression {
 	method new(Expression:D $left, Expression:D $right) {
 		self.bless(:$left, :$right);
 	}
+}
+
+role Op::Concatenative does Op::Binary {
+	method precedence(--> Precedence::Concatlike) {}
+}
+
+class Op::Concat does Op::Concatenative {
+	method operator(--> '||') {}
 }
 
 role Op::Comperative does Op::Binary {
@@ -309,21 +340,37 @@ role Op::List does Expression {
 	has Expression @.elements is required;
 }
 
-role Op::Logical[Str $operator, Precedence $precedence] does Op::List {
+role Op::Logical[Str $operator, Precedence $precedence, Constant $empty] does Op::List {
 	method precedence(--> Precedence) { $precedence }
 	method operator(--> Str) { $operator }
-	method empty(--> Expression) { ... }
 
 	method new(@elements) {
 		self.bless(:@elements);
 	}
+
+	method pack(*@expressions) {
+		given @expressions.elems {
+			when 1  { @expressions[0] }
+			when 0  { $empty.new }
+			default { self.new(@expressions) }
+		}
+	}
+
+	method unpack(Expression $expression) {
+		given $expression {
+			when self   { |$expression.elements }
+			when $empty { Empty }
+			default     { $expression }
+		}
+	}
+
+	method merge(*@expressions) {
+		my @unpacked = @expressions.map: { self.unpack($^expression) };
+		self.pack(@unpacked);
+	}
 }
-class Op::And does Op::Logical['AND', Precedence::And] {
-	method empty() { Value::True }
-}
-class Op::Or does Op::Logical['OR', Precedence::Or] {
-	method empty() { Value::False }
-}
+class Op::And does Op::Logical['AND', Precedence::And, Value::True] {}
+class Op::Or does Op::Logical['OR', Precedence::Or, Value::False] {}
 
 role Op::ListCompare[Str $operator] does Op::List {
 	method precedence(--> Precedence::In) {}
@@ -331,7 +378,7 @@ role Op::ListCompare[Str $operator] does Op::List {
 
 	has Expression:D $.left is required;
 
-	method new(Expression $left, Expression @elements) {
+	method new(Expression $left, @elements) {
 		self.bless(:$left, :@elements);
 	}
 }
@@ -366,50 +413,6 @@ class Rows {
 	}
 }
 
-class Table { ... }
-class Join { ... }
-class Source::Renamed { ... }
-class Source does Expression {
-	method precedence(--> Precedence::Rowlike) {}
-
-	multi submethod COERCE(Cool $pre-source) {
-		Table.new($pre-source);
-	}
-	multi submethod COERCE(Pair $ (:$key, Source(Any) :$value)) {
-		Source::Renamed.new($value, $key);
-	}
-
-	method join(|arguments) {
-		Join.new(self, |arguments);
-	}
-}
-
-class Source::Singular is Source {
-	method as(Table:D(Cool:D) $alias) {
-		Source::Renamed.new(self, $alias);
-	}
-}
-
-class Table is Source::Singular {
-	has Ident:D $.name is required handles<Str>;
-
-	method new(Ident(Cool:D) $name) {
-		self.bless(:$name);
-	}
-	method WHICH() {
-		ValueObjAt.new("SQL::Abstract::Table|{ self }");
-	}
-}
-
-class Source::Renamed is Source {
-	has Table:D $.alias is required;
-	has Source::Singular:D $.source is required;
-
-	method new(Source::Singular $source, Table:D(Cool:D) $alias) {
-		self.bless(:$source, :$alias);
-	}
-}
-
 class Column::Named { ... }
 class Column::Renamed { ... }
 class Column::All { ... }
@@ -418,8 +421,8 @@ class Column {
 	multi submethod COERCE(Cool $column) {
 		Column::Named.new($column);
 	}
-	multi submethod COERCE(Pair $ (Column::Named(Cool) :$key, Column(Any) :$value)) {
-		Column::Renamed.new($value, $key);
+	multi submethod COERCE(Pair $pair) {
+		Column::Renamed.COERCE($pair);
 	}
 	multi submethod COERCE(Pair $ (:$key, Bool :$value)) {
 		Column::Named.new($key);
@@ -432,15 +435,20 @@ class Column {
 	}
 }
 
-role Command {}
-
 class Sorter::Modifier { ... }
 class Sorter {
 	multi submethod COERCE(Cool $ident) {
 		Column::Named.new($ident);
 	}
 	multi submethod COERCE(Pair $pair) {
-		Sorter::Modifier.new($pair.key, $pair.value);
+		Sorter::Modifier.COERCE($pair);
+	}
+
+	method asc() {
+		Sorter::Modifier.new(self, 'asc');
+	}
+	method desc() {
+		Sorter::Modifier.new(self, 'desc');
 	}
 }
 
@@ -451,11 +459,12 @@ class Column::Renamable is Column {
 }
 
 class Column::Named is Column::Renamable is Sorter does Term {
-	has Ident:D $.ident is required handles<Str>;
+	has Ident:D $.name is required handles<Str>;
 
-	method new(Ident(Cool) $ident) {
-		self.bless(:$ident);
+	method new(Ident(Cool) $name) {
+		self.bless(:$name);
 	}
+
 	method WHICH() {
 		ValueObjAt.new("SQL::Abstract::Column::Named|{ self }");
 	}
@@ -471,6 +480,10 @@ class Column::Renamed is Column is Sorter {
 	}
 	multi method new(Column::Named(Cool) $source, Column::Named(Cool) $alias) {
 		self.bless(:$source, :$alias);
+	}
+
+	method COERCE(Pair $ (Column::Named(Cool) :$key, Column(Any) :$value)) {
+		Column::Renamed.new($value, $key);
 	}
 }
 
@@ -491,9 +504,11 @@ class Column::Expression is Column::Renamable is Sorter does Expression {
 	}
 }
 
-class Columns {
+role Column::List {
 	has Column:D @.elems is required;
+}
 
+class Column::Expressions does Column::List {
 	method new(@elems) {
 		self.bless(:@elems);
 	}
@@ -502,26 +517,51 @@ class Columns {
 		$column;
 	}
 	multi method COERCE(Column(Any) $column) {
-		Columns.new([$column]);
+		self.new([$column]);
 	}
 	multi method COERCE(@list) {
 		my Column(Any) @columns = @list;
-		Columns.new(@columns);
+		self.new(@columns);
 	}
 	multi method COERCE(%columns) {
 		samewith(%columns.sort(*.key));
 	}
 
-	multi method merge(Columns $other) {
+	multi method merge(Column::Expressions $other) {
+		self.new(|@!elems, |$other.elems);
+	}
+}
+
+class Column::Names does Column::List {
+	method new(@elems) {
+		self.bless(:@elems);
+	}
+
+	sub to-column(Column(Any) $column) {
+		$column;
+	}
+	multi method COERCE(Column::Named(Any) $column) {
+		self.new([$column]);
+	}
+	multi method COERCE(@list) {
+		my Column::Named(Any) @columns = @list;
+		self.new(@columns);
+	}
+	multi method COERCE(%columns) {
+		samewith(%columns.sort(*.key));
+	}
+
+	multi method merge(Column::Names $other) {
 		self.new(|@!elems, |$other.elems);
 	}
 }
 
 class Sorter::Modifier is Sorter {
-	my enum Order <Asc Desc>;
+	my enum Order (:Asc<ASC> :Desc<DESC>);
 	has Column:D $.column is required;
 	has Order:D $.order is required;
 
+	proto method new(|) { * }
 	multi method new(Column(Cool) $column, Order $order) {
 		self.bless(:$column, :$order);
 	}
@@ -530,7 +570,9 @@ class Sorter::Modifier is Sorter {
 		self.bless(:$column, :$order);
 	}
 
-	method modifier() { $!order.uc }
+	method COERCE(Pair $pair) {
+		self.new($pair.key, $pair.value);
+	}
 }
 
 class Sorters {
@@ -549,194 +591,35 @@ class Sorters {
 	}
 }
 
+class Window::Definition {
+	has Column::Named $.existing;
+	has Column::Expressions $.columns;
+	has Sorters $.order-by;
+}
+
 class Column::Window is Column::Renamable {
 	has Function:D $.function is required;
-	has Columns $.columns;
-	has Sorters $.order-by;
+	has Window::Definition:D $.window is required;
 
-	method new(Function:D(Cool:D) $function, Columns(Any) :$columns, Sorters(Any) :$order-by) {
-		self.bless(:$function, :$columns, :$order-by);
+	method new(Function:D(Cool:D) $function, Column::Expressions(Any) :$columns, Sorters(Any) :$order-by, Column::Named :$existing) {
+		my $window = Window::Definition.new(:$existing, :$columns, :$order-by);
+		self.bless(:$function, :$window);
 	}
 }
 
-my sub pack-expressions(Op::Logical ::Class, @expressions) {
-	given @expressions.elems {
-		when 1  { @expressions[0] }
-		when 0  { Class.empty.new ; }
-		default { Class.new(@expressions) }
-	}
+class Window {
+	has Column::Named:D $.name is required;
+	has Window::Definition:D $.definition is required;
 }
 
-sub unpack-expression(Op::Logical ::Class, Expression $expression) {
-	given $expression {
-		when Class       { $expression.elements }
-		when Class.empty { Empty }
-		default          { $expression }
-	}
-}
+class Windows {
+	has Window @.windows;
 
-role Conditional {
-	has Expression:D $.expression is required;
-
-	proto method new(|) { * }
-	multi method new(@expressions) {
-		my $expression = pack-expressions(Op::And, @expressions);
-		self.bless(:$expression);
+	multi method COERCE(@windows) {
+		self.bless(:@windows);
 	}
-	multi method new(Expression $expression) {
-		self.bless(:$expression);
-	}
-
-	multi method merge(Conditional:D: Conditional:D $other) {
-		my @left = unpack-expression(Op::And, $!expression);
-		my @right = unpack-expression(Op::And, $other.expression);
-		my $expression = pack-expressions(Op::And, flat(@left, @right));
-		self.new($expression);
-	}
-	multi method merge(Conditional:U: Conditional:D $other) {
-		self.new($other.expression);
-	}
-	multi method merge(Conditional: Conditional:U $other) {
-		self;
-	}
-}
-
-class Conditions does Conditional {
-	role Partial {
-		method resolve(Column::Named:D $name) { ... }
-	}
-	class Partial::Simple does Partial {
-		has Expression:U $.class is required;
-		has Capture:D $.arguments is required;
-
-		method new(Expression:U $class, |capture) {
-			self.bless(:$class, :arguments(capture));
-		}
-		method resolve(Column::Named:D $name) {
-			$!class.new($name, |$!arguments);
-		}
-	}
-
-	class Partial::Custom does Partial {
-		has Code:D $.callback is required;
-
-		method new(Code:D $callback) {
-			self.bless(:$callback);
-		}
-		method resolve(Column::Named:D $name) {
-			$!callback($name);
-		}
-	}
-
-	my multi expand-partial(Any:D $expression) {
-		Partial::Simple.new(Op::Equals, expand-expression($expression));
-	}
-	my multi expand-partial(Any:U $expression) {
-		Partial::Simple.new(Op::IsNull);
-	}
-
-	my multi expand-pair('isnull', $value) {
-		Partial::Simple.new(Op::IsNull);
-	}
-	my multi expand-pair('isnotnull', $value) {
-		Partial::Simple.new(Op::IsNotNull);
-	}
-	my $binary-like = any(%binary-op-for.keys);
-	my multi expand-pair(Str $key where $key eq $binary-like, $value) {
-		Partial::Simple.new(%binary-op-for{$key}, expand-expression($value));
-	}
-	my multi expand-partial(Pair $ (:$key, :$value)) {
-		expand-pair($key, $value);
-	}
-
-	my multi expand-partial(%hash) {
-		%hash.sort(*.key)».&expand-partial;
-	}
-	my multi expand-partial(Range $range) {
-		my $min = Value.new($range.min);
-		my $max = Value.new($range.max);
-		Partial::Simple.new(Op::Between, $min, $max);
-	}
-
-	subset PartialEquals of Partial::Simple where .class ~~ Op::Equals && .arguments.elems == 1;
-
-	my multi expand-junction('any', @partials) {
-		Partial::Custom.new: -> $name { pack-expressions(Op::Or, @partials».resolve($name)) };
-	}
-	my multi expand-junction('any', @partials where all(@partials) ~~ PartialEquals) {
-		my Expression @values = @partials».arguments»[0];
-		Partial::Simple.new(Op::In, @values);
-	}
-	my multi expand-junction('all', @partials) {
-		Partial::Custom.new: -> $name { pack-expressions(Op::And, @partials».resolve($name)) }
-	}
-	my multi expand-junction('none', @partials) {
-		Partial::Custom.new: -> $name { pack-expressions(Op::And, @partials».resolve($name)».negate) }
-	}
-	my multi expand-junction('none', @partials where all(@partials) ~~ PartialEquals) {
-		my Expression @values = @partials».arguments»[0];
-		Partial::Simple.new(Op::NotIn, @values);
-	}
-	my multi expand-junction('one', @partials) {
-		Partial::Custom.new: -> $name {
-			my @comparisons = @partials».resolve;
-			my $addition = @comparisons.reduce: { Op::Binary::Additive.new('+', $^left, $^right) };
-			Op::Equals.new($addition, Value.new(1));
-		}
-	}
-	my multi expand-partial(Junction $junction) {
-		use nqp;
-		my $type = nqp::box_s(nqp::getattr($junction, Junction, '$!type'), Str);
-		my @eigenstates = nqp::getattr($junction, Junction, '$!eigenstates').List;
-		expand-junction($type, @eigenstates.map(&expand-partial));
-	}
-
-	my sub expand-condition(Pair $ (Column::Named(Str) :$key, Mu :$value)) {
-		expand-partial($value).map(*.resolve($key));
-	}
-
-	multi method COERCE(Expression $expression) {
-		Conditions.bless(:$expression);
-	}
-	multi method COERCE(Pair $pair) {
-		Conditions.new(expand-condition($pair));
-	}
-	multi method COERCE(@list) {
-		Conditions.new(@list».&expand-condition.flat);
-	}
-	multi method COERCE(%hash) {
-		Conditions.new(%hash.sort».&expand-condition.flat);
-	}
-}
-
-class Join is Source {
-	enum Type <Inner Left Right Outer>;
-
-	class On does Conditional {
-		sub expand(Pair $pair (Column::Named(Cool) :$key, Column::Named(Cool) :$value)) {
-			Op::Equals.new($key, $value);
-		}
-		multi method COERCE(Conditions $conditions) {
-			On.new($conditions.expression);
-		}
-		multi method COERCE(%hash) {
-			On.new(%hash.sort(*.key)».&expand);
-		}
-	}
-
-	has Source:D $.left is required;
-	has Source:D $.right is required;
-	has On $.on;
-	has Columns $.using;
-	has Type:D $.type = Type::Inner;
-	has Bool $.lateral;
-
-	proto method new(|) { * }
-	multi method new(Source(Any) $left, Source(Any) $right, Columns(Any) :$using!, Type :$type = Type::Inner, Bool :$lateral = False) {
-		self.bless(:$left, :$right, :$using, :$type, :$lateral);
-	}
-	multi method new(Source(Any) $left, Source(Any) $right, On(Any:D) :$on!, Type :$type = Type::Inner, Bool :$lateral = False) {
-		self.bless(:$left, :$right, :$on, :$type, :$lateral);
+	multi method COERCE(Window $window) {
+		self.bless(:windows[ $window ]);
 	}
 }
 
@@ -758,15 +641,261 @@ class Assigns {
 	}
 
 	method keys() {
-		@!pairs».key;
+		@!pairs.map(*.key);
 	}
 	method values() {
-		@!pairs».value;
+		@!pairs.map(*.value);
+	}
+}
+
+role Conditional {
+	has Expression:D $.expression is required;
+
+	proto method new(|) { * }
+	multi method new(@expressions) {
+		my $expression = Op::And.pack(@expressions);
+		self.bless(:$expression);
+	}
+	multi method new(Expression $expression) {
+		self.bless(:$expression);
+	}
+
+	multi method merge(Conditional:D: Conditional:D $other) {
+		my $expression = Op::And.merge($!expression, $other.expression);
+		self.new($expression);
+	}
+	multi method merge(Conditional:U: Conditional:D $other) {
+		self.new($other.expression);
+	}
+	multi method merge(Conditional: Conditional:U $other) {
+		self;
+	}
+}
+
+class Conditions does Conditional {
+	my multi expand-partial(Expression $left, Any:D $expression) {
+		Op::Equals.new($left, expand-expression($expression));
+	}
+	my multi expand-partial(Expression $left, Any:U $expression) {
+		Op::IsNull.new($left);
+	}
+
+	my multi expand-pair(Expression $left, 'isnull', $value) {
+		Op::IsNull.new($left);
+	}
+	my multi expand-pair(Expression $left, 'isnotnull', $value) {
+		Op::IsNotNull.new($left);
+	}
+	my multi expand-pair(Expression $left, Str $key, Any $value) {
+		my $expression = expand-expression($value);
+		if %binary-op-for{$key}:exists {
+			%binary-op-for{$key}.new($left, $expression);
+		} else {
+			Op::Comperative::Custom.new($key, $left, $expression);
+		}
+	}
+	my multi expand-partial(Expression $left, Pair $ (:$key, :$value)) {
+		expand-pair($left, $key, $value);
+	}
+
+	my multi expand-partial(Expression $left, %hash) {
+		%hash.sort(*.key).map: { expand-partial($left, $^pair) };
+	}
+	my multi expand-partial(Expression $left, Range $range) {
+		my $min = Placeholder.new($range.min);
+		my $max = Placeholder.new($range.max);
+		Op::Between.new($left, $min, $max);
+	}
+
+	my multi expand-junction(Expression $left, 'any', @partials) {
+		Op::Or.pack(@partials);
+	}
+	my multi expand-junction(Expression $left, 'any', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
+		Op::In.new($left, @partials».right);
+	}
+	my multi expand-junction(Expression $left, 'all', @partials) {
+		Op::And.pack(@partials);
+	}
+	my multi expand-junction(Expression $left, 'none', @partials) {
+		Op::And.pack(@partials».negate);
+	}
+	my multi expand-junction(Expression $left, 'none', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
+		Op::NotIn.new($left, @partials».right);
+	}
+	my multi expand-junction(Expression $left, 'one', @partials) {
+		my @comparisons = @partials».resolve;
+		my $addition = @comparisons.reduce: { Op::Binary::Additive.new('+', $^left, $^right) };
+		Op::Equals.new($addition, Integer.new(1));
+	}
+	my multi expand-partial(Expression $left, Junction $junction) {
+		use nqp;
+		my $type = nqp::box_s(nqp::getattr($junction, Junction, '$!type'), Str);
+		my @eigenstates = nqp::getattr($junction, Junction, '$!eigenstates').List;
+		expand-junction($left, $type, @eigenstates.map({ expand-partial($left, $^value) }));
+	}
+
+	my multi expand-condition(Pair $ (Column::Named(Cool) :$key, Mu :$value)) {
+		expand-partial($key, $value);
+	}
+	my multi expand-condition(Pair $ (Expression :$key, Mu :$value)) {
+		expand-partial($key, $value);
+	}
+
+	multi method COERCE(Expression $expression) {
+		Conditions.bless(:$expression);
+	}
+	multi method COERCE(Pair $pair) {
+		Conditions.new(expand-condition($pair));
+	}
+	multi method COERCE(@list) {
+		Conditions.new(@list».&expand-condition);
+	}
+	multi method COERCE(%hash) {
+		samewith(%hash.sort);
+	}
+}
+
+class Table { ... }
+class Join::On { ... }
+class Join::On::Conditions { ... }
+class Join::Using { ... }
+class Source::Renamed { ... }
+class Select { ... }
+
+class Source does Expression {
+	method precedence(--> Precedence::Rowlike) {}
+
+	multi submethod COERCE(Cool $pre-source) {
+		Table.new($pre-source);
+	}
+	multi submethod COERCE(Pair $pair) {
+		Source::Renamed.COERCE($pair);
+	}
+
+	multi method join(Source:D(Any:D) $right, Table(Cool) :$as, Join::On::Conditions(Any) :$on!, *%arguments) {
+		my $new-right = $as ?? $right.as($as) !! $right;
+		Join::On.new(self, $new-right, $on, |%arguments);
+	}
+	multi method join(Source:D(Any:D) $right, Table(Cool) :$as, Column::Names(Any) :$using!, *%arguments) {
+		my $new-right = $as ?? $right.as($as) !! $right;
+		Join::Using.new(self, $new-right, $using, |%arguments);
+	}
+
+	method select(Column::Expressions:D(Any:D) $columns = *, Conditions(Any) $where?, *%arguments) {
+		Select.new(:$columns, :source(self), :$where, |%arguments);
+	}
+
+	method as(Table:D(Cool:D) $alias, Column::Names(Any) $columns?) {
+		Source::Renamed.new(self, $alias, $columns);
+	}
+}
+
+class Insert::Values { ... }
+class Insert::Select { ... }
+class Insert::Defaults { ... }
+class Update::Pairwise { ... }
+class Update::Row      { ... }
+class Update::Select { ... }
+class Delete { ... }
+
+class Table is Source {
+	has Ident:D $.name is required handles<Str>;
+
+	method new(Ident(Cool:D) $name) {
+		self.bless(:$name);
+	}
+
+	multi method update(Assigns:D(Any:D) $set, Conditions(Any) $where?, *%arguments) {
+		Update::Pairwise.new(:target(self), :$set, :$where, |%arguments);
+	}
+	multi method update(Column:D(Any:D) $columns, Row $row, Conditions(Any) $where?, *%arguments) {
+		Update::Row.new(:target(self), :$columns, :expressions($row.elements), :$where, |%arguments);
+	}
+	multi method update(Column::Names:D(Any:D) $columns, Select:D $select, Conditions(Any) $where?, *%arguments) {
+		Update::Select.new(:target(self), :$columns, :$select, :$where, |%arguments);
+	}
+
+	multi method insert(Column::Names(Any) $fields, Rows:D(List:D) $rows, *%arguments) {
+		Insert::Values.new(:target(self), :$fields, :$rows, |%arguments);
+	}
+	multi method insert(Assigns:D(Cool:D) $values, *%arguments) {
+		samewith($values.keys, [$values.values,], |%arguments);
+	}
+	multi method insert(Column::Names(Any) $fields, Select $select, *%arguments) {
+		Insert::Select.new(:target(self), :$fields, :$select, |%arguments);
+	}
+	multi method insert(Value::Default, *%arguments) {
+		Insert::Defaults.new(:target(self), |%arguments);
+	}
+
+	method delete(Conditions(Any) $where?, *%arguments) {
+		Delete.new(:target(self), :$where, |%arguments);
+	}
+
+	multi method concat(Column::Named $column) {
+		Column::Named.new($!name.concat($column.name));
+	}
+	multi method concat(Column::Named @names) {
+		@names.map: { self.concat($^name) };
+	}
+
+	method WHICH() {
+		ValueObjAt.new("SQL::Abstract::Table|{ self }");
+	}
+}
+
+class Source::Renamed is Source {
+	has Table:D $.alias is required;
+	has Source:D $.source is required;
+	has Column::Names $.columns;
+
+	method new(Source:D $source, Table:D(Cool:D) $alias, Column::Names(Any) $columns?) {
+		self.bless(:$source, :$alias, :$columns);
+	}
+
+	method COERCE(Pair $ (:$key, Source(Any) :$value)) {
+		Source::Renamed.new($value, $key);
+	}
+}
+
+class Join is Source {
+	enum Type <Inner Left Right Outer>;
+
+	has Source:D $.left is required;
+	has Source:D $.right is required;
+	has Type:D $.type = Type::Inner;
+	has Bool $.lateral = False;
+
+}
+
+class Join::On::Conditions does Conditional {
+	sub expand(Pair $pair (Column::Named(Cool) :$key, Column::Named(Cool) :$value)) {
+		Op::Equals.new($key, $value);
+	}
+	multi method COERCE(Conditions $conditions) {
+		self.new($conditions.expression);
+	}
+	multi method COERCE(%hash) {
+		self.new(%hash.sort(*.key)».&expand);
+	}
+}
+class Join::On is Join {
+	has Join::On::Conditions $.on;
+
+	method new(Source(Any) $left, Source(Any) $right, Join::On::Conditions(Any:D) $on, Join::Type :$type = Join::Type::Inner, Bool :$lateral = False) {
+		self.bless(:$left, :$right, :$on, :$type, :$lateral);
+	}
+}
+
+class Join::Using is Join {
+	has Column::Names $.using;
+	method new(Source(Any) $left, Source(Any) $right, Column::Names(Any) $using, Join::Type :$type = Join::Type::Inner, Bool :$lateral = False) {
+		self.bless(:$left, :$right, :$using, :$type, :$lateral);
 	}
 }
 
 class Locking {
-	enum Strength <Update NoKeyUpdate Share KeyShare>;
+	enum Strength (:Update<UPDATE> :NoKeyUpdate('NO KEY UPDATE') :Share<SHARE> :KeyShare('KEY SHARE'));
 
 	has Strength:D $.strength is required;
 	has Table $.table;
@@ -787,64 +916,239 @@ class Locking {
 	}
 }
 
-class Common {
-	has Source::Renamed @.tables;
-	has Bool $.recursive;
-
-	method new(Source::Renamed @tables) {
-		self.bless(:@tables);
-	}
-
-	method COERCE(@pairs) {
-		my Source(Pair) @tables = @pairs;
-		self.bless(:@tables);
-	}
-}
-
-class Select { ... }
-
-class Union {
+class Compound {
+	enum Type <Union Intersect Except>;
+	has Type:D $.type = Union;
 	has Bool $.all;
 	has Select $.next;
 
-	method new(Select $next, Bool $all = False) {
-		self.bless(:$next, :$all);
+	method new(Type:D $type, Select $next, Bool $all = False) {
+		self.bless(:$type, :$next, :$all);
+	}
+
+	method COERCE(Pair $pair) {
+		my $key = $pair.key.lc;
+		my $all = so $key ~~ s/ '-all' $ //;
+		my $type = Type.WHO{$key.tc};
+		self.new($type, $pair.value, $all);
 	}
 }
 
-class Select is Source::Singular does Command does Expression {
+class Limit {
+	class All does Constant['ALL'] {}
+
+	has Expression $.value;
+
+	method new(Expression $value) {
+		self.bless(:$value);
+	}
+
+	multi method COERCE(Int $value) {
+		self.new(Integer.new($value));
+	}
+	multi method COERCE(Inf) {
+		self.new(All.new);
+	}
+}
+
+class Offset {
+	has Expression $.value;
+
+	method new(Expression $value) {
+		self.bless(:$value);
+	}
+
+	multi method COERCE(Int $value) {
+		self.new(Integer.new($value));
+	}
+}
+
+role Keyword does Expression {
+	method precedence() { Precedence::Rowlike }
+}
+
+class Common { ... }
+
+role Command does Keyword {
 	has Common(Any)      $.common-tables;
-	has Columns:D(Any:D) $.columns = *;
-	has Bool             $.distinct;
+}
+
+class Values does Keyword {
+	has Rows:D  $.rows is required;
+	has Sorters $.order-by;
+	has Limit   $.limit;
+	has Offset  $.offset;
+}
+
+class SubQuery is Source {
+	has Command:D       $.command is required;
+	has Table:D(Cool:D) $.alias is required;
+
+	method new(Command:D $command, Table:D(Cool:D) $alias) {
+		self.bless(:$command, :$alias);
+	}
+}
+
+class Common {
+	class Rename {
+		has Table:D $.alias is required;
+		has Keyword:D $.keyword is required;
+		method new(Table:D(Cool:D) $alias, Keyword:D $keyword) {
+			self.bless(:$alias, :$keyword);
+		}
+		method COERCE(Pair $pair) {
+			self.new($pair.key, $pair.value);
+		}
+	}
+	has Rename @.tables;
+	has Bool $.recursive;
+
+	method new(Source::Renamed @tables, Bool :$recursive) {
+		self.bless(:@tables, :$recursive);
+	}
+
+	method COERCE(@pairs) {
+		my Rename(Pair) @tables = @pairs;
+		self.bless(:@tables);
+	}
+}
+
+class Distinct::All { ... }
+class Distinct::Expressions { ... }
+
+class Distinct {
+	multi submethod COERCE(Bool $value) {
+		$value ?? Distinct::All.new !! Distinct;
+	}
+	multi submethod COERCE(Column::Names(Cool) $columns) {
+		my Expression @expressions = $columns.elems;
+		Distinct::Expressions.new(@expressions);
+	}
+}
+
+class Distinct::All is Distinct {}
+
+class Distinct::Expressions is Distinct {
+	has Expression @.expressions;
+
+	method new(Expression @expressions) {
+		self.bless(:@expressions);
+	}
+	
+}
+
+class Select does Command does Expression {
+	has Column::Expressions:D(Any:D) $.columns is required;
+	has Distinct(Any)    $.distinct;
 	has Source:D(Any:D)  $.source is required;
 	has Conditions(Any)  $.where;
-	has Columns(Any)     $.group-by;
+	has Column::Expressions(Any)     $.group-by;
 	has Conditions(Any)  $.having;
-	has Union(Select)    $.union;
+	has Windows          $.windows;
+	has Compound(Pair)   $.compound;
+
 	has Sorters(Any)     $.order-by;
-	has Int              $.limit;
-	has Int              $.offset;
+	has Limit(Any)       $.limit;
+	has Offset(Any)      $.offset;
 	has Locking(Any)     $.locking;
+
+	method as(Table:D(Cool:D) $alias) {
+		SubQuery.new(self, $alias);
+	}
 }
 
-class Insert does Command {
-	has Table:D(Cool:D) $.target is required;
-	has Columns(Any)    $.fields;
-	has Rows(Any)       $.rows;
-	has Columns(Any)    $.returning;
+class Conflict::Nothing { ... }
+class Conflict::Update  { ... }
+class Conflict {
+	role Target {
+	}
+	class Target::Columns does Target {
+		has Column::Names:D $.columns is required;
+		has Conditions      $.where;
+
+		method new(Column::Names:D(Any) $columns, Conditions(Any) $where?) {
+			self.bless(:$columns, :$where);
+		}
+	}
+	class Target::Constraint does Target {
+		has Column::Named:D $.name is required;
+		method new(Column::Named:D $name) {
+			self.bless(:$name);
+		}
+	}
+	has Target $.target;
+
+	multi submethod COERCE(Str $string where $string.lc eq 'nothing') {
+		Conflict::Nothing.new;
+	}
 }
 
-class Update does Command {
-	has Table:D(Cool:D) $.target is required;
-	has Assigns:D(Hash:D) $.set is required;
-	has Conditions(Any) $.where;
-	has Columns(Any) $.returning;
+class Conflict::Nothing is Conflict {
+	method new(Conflict::Target $target?) {
+		self.bless(:$target);
+	}
+}
+
+class Conflict::Update is Conflict {
+	has Assigns:D(Cool:D) $.assigns is required;
+	has Conditions(Any)   $.where;
+	multi method new(Conflict::Target:D $target, Assigns:D(Cool:D) $assigns, Conditions(Any) $where?) {
+		self.bless(:$target, :$assigns, :$where);
+	}
+	multi method new(Conflict::Target::Columns:D(Any) $target, Assigns:D(Cool:D) $assigns, Conditions(Any) $where?) {
+		self.bless(:$target, :$assigns, :$where);
+	}
+}
+
+role Insert does Command {
+	has Table:D(Cool:D)    $.target is required;
+	has Table(Cool)        $.as;
+	has Column::Names(Any) $.fields;
+	has Conflict(Any)      $.conflict;
+	has Column::Expressions(Any)       $.returning;
+}
+
+class Insert::Values does Insert {
+	has Rows:D(List:D)     $.rows is required;
+}
+
+class Insert::Defaults does Insert {
+}
+
+class Insert::Select does Insert {
+	has Select:D $.select is required;
+}
+
+role Update does Command {
+	has Table:D(Cool:D)   $.target is required;
+	has Bool              $.only;
+	has Table(Cool)       $.as;
+	has Source(Any)       $.from;
+	has Conditions(Any)   $.where;
+	has Column::Expressions(Any)      $.returning;
+}
+
+class Update::Pairwise does Update {
+	has Assigns:D(Cool:D) $.set is required;
+}
+
+class Update::Row does Update {
+	has Column::Names:D(Any) $.columns;
+	has Row(Any)             $.row is required;
+}
+
+class Update::Select does Update {
+	has Column::Names:D(Any) $.columns;
+	has Select:D             $.select is required;
 }
 
 class Delete does Command {
 	has Table:D(Cool:D) $.target is required;
+	has Bool            $.only;
+	has Table(Cool)     $.as;
+	has Source(Any)     $.using;
 	has Conditions(Any) $.where;
-	has Columns(Any) $.returning;
+	has Column::Expressions(Any)    $.returning;
 }
 
 role Placeholders {
@@ -873,14 +1177,14 @@ class Delayed {
 	has Any $.default;
 
 	proto method new(|args) { * }
-	multi method new(Str:D $identifier) {
-		self.bless(:$identifier);
+	multi method new(Str:D $identifier, Any :$default!, Any:U :$type = $default.WHAT) {
+		self.bless(:$identifier, :$type, :$default, :has-default);
 	}
 	multi method new(Str:D $identifier, Any:U :$type!) {
 		self.bless(:$identifier, :$type);
 	}
-	multi method new(Str:D $identifier, Any :$default!, Any:U :$type = $default.WHAT) {
-		self.bless(:$identifier, :$type, :$default, :has-default);
+	multi method new(Str:D $identifier) {
+		self.bless(:$identifier);
 	}
 }
 
@@ -923,10 +1227,7 @@ class Prepared {
 }
 
 role Renderer {
-	method render-select() { ... }
-	method render-insert() { ... }
-	method render-update() { ... }
-	method render-delete() { ... }
+	method render-keyword() { ... }
 }
 
 class Renderer::SQL { ... }
@@ -944,7 +1245,8 @@ class Renderer::SQL does Renderer {
 	}
 
 	method render-list(Placeholders $arguments, @elements, Bool $parenthesize --> Str) {
-		my @elems = @elements.map: { self.render-expression($arguments, $^element, Precedence::Comma) };
+		my $precedence = @elements > 1 ?? Precedence::Comma !! Precedence::Rowlike;
+		my @elems = @elements.map: { self.render-expression($arguments, $^element, $precedence) };
 		parenthesize-if(@elems.join(', '), $parenthesize);
 	}
 
@@ -960,33 +1262,46 @@ class Renderer::SQL does Renderer {
 		my $result = {*};
 		parenthesize-if($result, $outer > $expression.precedence);
 	}
-	multi method render-expression(Placeholders $placeholders, Literal $ (:$payload, :@arguments, :$precedence), Precedence --> Str) {
-		$payload.subst(/ <!after '\\'> '?'/, { $placeholders.bind(@arguments.shift) }, :g);
+	multi method render-expression(Placeholders $placeholders, Literal $literal, Precedence --> Str) {
+		$literal.payload.subst(/ <!after '\\'> '?'/, { $placeholders.bind($literal.arguments.shift) }, :g);
 	}
-	multi method render-expression(Placeholders $placeholders, Value $ (:$value), Precedence --> Str) {
-		$placeholders.bind($value);
+	multi method render-expression(Placeholders $placeholders, Placeholder $placeholder, Precedence --> Str) {
+		$placeholders.bind($placeholder.value);
+	}
+	multi method render-expression(Placeholders $placeholders, Integer $integer, Precedence --> Str) {
+		~$integer.value;
 	}
 	multi method render-expression(Placeholders $placeholders, Constant $constant, Precedence --> Str) {
 		$constant.keyword;
 	}
-	multi method render-expression(Placeholders $placeholders, Row $ (:@elements), Precedence --> Str) {
-		self.render-list($placeholders, @elements, True);
+	multi method render-expression(Placeholders $placeholders, Row $row, Precedence --> Str) {
+		self.render-list($placeholders, $row.elements, True);
 	}
-	multi method render-expression(Placeholders $placeholders, Function $ (:$name, :@arguments), Precedence --> Str) {
-		$name ~ self.render-list($placeholders, @arguments, True);
+	multi method render-expression(Placeholders $placeholders, Column $column, Precedence $outer --> Str) {
+		self.render-column($placeholders, $column);
 	}
-	multi method render-expression(Placeholders $placeholders, Op::Unary::Postfix $op, Precedence --> Str) {
-		my $value = self.render-expression($placeholders, $op.value, Precedence::Postfix);
-		"$value $op.postfix()";
+	multi method render-expression(Placeholders $placeholders, Op::Cast $cast, Precedence $ --> Str) {
+		"CAST({ self.render-expression($placeholders, $cast.primary, Precedence::Comma) } AS $cast.type())";
 	}
-	multi method render-expression(Placeholders $placeholders, Op::Unary::Prefix $op, Precedence --> Str) {
-		my $primary = self.render-expression($placeholders, $op.value, Precedence::Prefix);
-		"$op.operator() $primary";
+	multi method render-expression(Placeholders $placeholders, Function $function, Precedence --> Str) {
+		$function.name ~ self.render-list($placeholders, $function.arguments, True);
+	}
+	multi method render-expression(Placeholders $placeholders, Op::Unary::Prefix::Tight $op, Precedence --> Str) {
+		my $primary = self.render-expression($placeholders, $op.value, Precedence::TightPrefix);
+		$op.operator ~ $primary;
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Binary $op, Precedence --> Str) {
 		my $left = self.render-expression($placeholders, $op.left, $op.precedence);
 		my $right = self.render-expression($placeholders, $op.right, $op.precedence);
 		"$left $op.operator() $right";
+	}
+	multi method render-expression(Placeholders $placeholders, Op::Unary::Postfix $op, Precedence --> Str) {
+		my $value = self.render-expression($placeholders, $op.value, Precedence::Postfix);
+		"$value $op.postfix()";
+	}
+	multi method render-expression(Placeholders $placeholders, Op::Unary::Prefix::Loose $op, Precedence --> Str) {
+		my $primary = self.render-expression($placeholders, $op.value, Precedence::LoosePrefix);
+		"$op.operator() $primary";
 	}
 	multi method render-expression(Placeholders $placeholders, Op::ListCompare $in, Precedence --> Str) {
 		my $left = self.render-expression($placeholders, $in.left, $in.precedence);
@@ -1004,46 +1319,53 @@ class Renderer::SQL does Renderer {
 		my @elems = $logical.elements.map: { self.render-expression($placeholders, $^element, $logical.precedence) };
 		@elems.join(" $logical.operator() ");
 	}
-	multi method render-expression(Placeholders $placeholders, Op::Cast $cast, Precedence $ --> Str) {
-		"CAST({ self.render-expression($placeholders, $cast.primary, Precedence::Comma) } AS $cast.type())";
-	}
-	multi method render-expression(Placeholders $placeholders, Select $select, Precedence $outer --> Str) {
-		"({self.render-select-expression($placeholders, $select)})";
-	}
-	multi method render-expression(Placeholders $placeholders, Column $column, Precedence $outer --> Str) {
-		self.render-column($placeholders, $column);
+	multi method render-expression(Placeholders $placeholders, Command $command, Precedence $outer --> Str) {
+		self.render-keyword-expression($placeholders, $command);
 	}
 
-	multi method render-column(Placeholders $placeholders, Column::Named $ (:$ident)--> Str) {
-		self.render-identifier($ident);
+	multi method render-distinct(Placeholders $placeholders, Distinct::Expressions:D $source) {
+		'DISTINCT ON', self.render-list($placeholders, $source.expressions, True);
 	}
-	multi method render-column(Placeholders $placeholders, Column::Renamed $ (:$source, :$alias) --> Str) {
-		my $input = self.render-column($placeholders, $source);
-		my $output = self.render-column($placeholders, $alias);
+	multi method render-distinct(Placeholders $placeholders, Distinct::All:D $source) {
+		'DISTINCT';
+	}
+	multi method render-distinct(Placeholders $placeholders, Distinct:U $source) {
+		Empty;
+	}
+
+	method render-window-definition(Placeholders $placeholders, Window::Definition $definition) {
+		my @inner;
+		@inner.push: self.render-column($placeholders, $definition.existing) with $definition.existing;
+		@inner.push: self.render-columns($placeholders, $definition.columns, 'PARTITION BY');
+		@inner.push: self.render-order-by($placeholders, $definition.order-by);
+		"({ @inner.join(' ') })";
+	}
+
+	multi method render-column(Placeholders $placeholders, Column::Named $column --> Str) {
+		self.render-identifier($column.name);
+	}
+	multi method render-column(Placeholders $placeholders, Column::Renamed $column --> Str) {
+		my $input = self.render-column($placeholders, $column.source);
+		my $output = self.render-column($placeholders, $column.alias);
 		"$input AS $output";
 	}
 	multi method render-column(Placeholders $placeholders, Column::All --> '*') {}
 	multi method render-column(Placeholders $placeholders, Column::Expression $ (:$expression) --> Str) {
 		self.render-expression($placeholders, $expression, Precedence::Comma);
 	}
-	multi method render-column(Placeholders $placeholders, Column::Window $ (:$function, :$columns, :$order-by) --> Str) {
-		my $window-function = self.render-expression($placeholders, $function, Precedence::Comma);
-		my @inner;
-		@inner.push: 'PARTITION BY', self.render-columns($placeholders, $columns) with $columns;
-		@inner.push: self.render-order-by($placeholders, $order-by);
-		"$window-function OVER ({ @inner.join(' ') })";
+	multi method render-column(Placeholders $placeholders, Column::Window $column --> Str) {
+		my $window-function = self.render-expression($placeholders, $column.function, Precedence::Comma);
+		my $window-definition = self.render-window-definition($placeholders, $column.window);
+		"$window-function OVER $window-definition";
 	}
 
-	method render-columns(Placeholders $placeholders, Columns $columns, Bool $parenthesized = False --> Str) {
+	multi method render-columns(Placeholders $placeholders, Column::List:D $columns, Str $prefix?, Bool :$parenthesize --> List) {
 		my @elems = $columns.elems.map: { self.render-column($placeholders, $^column) };
-		parenthesize-if(@elems.join(', '), $parenthesized);
+		my $results = parenthesize-if(@elems.join(', '), $parenthesize);
+		$prefix ?? ($prefix, $results) !! ($results,);
 	}
-
-	multi method render-sorter(Placeholders $placeholders, Column $column --> Str) {
-		self.render-column($placeholders, $column);
-	}
-	multi method render-sorter(Placeholders $placeholders, Sorter::Modifier $column --> Str) {
-		"{ self.render-column($placeholders, $column.column) } $column.modifier()";
+	multi method render-columns(Placeholders $placeholders, Column::List:U $columns, Str $prefix?, Bool :$parenthesize --> List) {
+		Empty;
 	}
 
 	method render-table(Table $source --> Str) {
@@ -1053,90 +1375,34 @@ class Renderer::SQL does Renderer {
 	multi method render-source(Placeholders $, Table $table --> Str) {
 		self.render-table($table);
 	}
-	multi method render-source(Placeholders $placeholders, Select $command --> Str) {
-		"({ self.render-select-expression($placeholders, $command) })";
+	multi method render-source(Placeholders $placeholders, SubQuery $query --> Str) {
+		my $rendered = self.render-keyword-expression($placeholders, $query.query);
+		"($rendered) AS ", self.render-table($query.alias);
 	}
 	multi method render-source(Placeholders $placeholders, Source::Renamed $renamed--> Str) {
 		my $source = self.render-source($placeholders, $renamed.source);
-		my $alias = self.render-table($renamed.alias);
+		my $alias  = self.render-table($renamed.alias);
 		"$source AS $alias";
 	}
+	multi method render-join-condition(Placeholders $placeholders, Join::On $join) {
+		self.render-conditions($placeholders, $join.on, 'ON');
+	}
+	multi method render-join-condition(Placeholders $placeholders, Join::Using $join) {
+		self.render-columns($placeholders, $join.using, 'USING', :parenthesize);
+	}
 	multi method render-source(Placeholders $placeholders, Join $join --> List) {
-		my $left = self.render-source($placeholders, $join.left);
-		my $right = self.render-source($placeholders, $join.right);
-		my $type = $join.type.uc;
+		my $left    = self.render-source($placeholders, $join.left);
+		my $right   = self.render-source($placeholders, $join.right);
+		my $type    = $join.type.uc;
 		my @lateral = $join.lateral ?? 'LATERAL' !! Empty;
-		my @on = $join.on    ?? self.render-conditions($placeholders, $join.on, 'ON')
-		    !!   $join.using ?? 'USING ' ~ self.render-columns($placeholders, $join.using, True)
-		    !!                  Empty;
+		my @on      = self.render-join-condition($placeholders, $join);
 		$left, $type, 'JOIN', |@lateral, $right, |@on;
 	}
 
-	method render-row(Placeholders $placeholders, Row $row --> Str) {
-		self.render-list($placeholders, $row.elements, True);
-	}
-
-	method render-values(Placeholders $placeholders, Rows $rows --> Str) {
-		$rows.elems.map({ self.render-row($placeholders, $^row) }).join(', ');
-	}
-
-	multi method render-conditions(Placeholders $placeholders, Conditional:D $conditions, Str $type = 'WHERE' --> Str) {
-		"$type " ~ self.render-expression($placeholders, $conditions.expression, Precedence::And);
-	}
-	multi method render-conditions(Placeholders $placeholders, Conditional:U $conditions, Str $type = Str --> List) {
-		Empty;
-	}
-
-	multi method render-order-by(Placeholders $placeholders, Sorters:D $sorters --> List) {
-		my @elems = $sorters.elems.map: { self.render-sorter($placeholders, $^column) };
-		'ORDER BY', @elems.join(', ');
-	}
-	multi method render-order-by(Placeholders $placeholders, Sorters:U $sorters --> List) {
-		Empty;
-	}
-
-	multi method render-group-by(Placeholders $placeholders, Columns:D $columns, Conditions $conditions --> List) {
-		my $group-by = self.render-columns($placeholders, $columns);
-		my @having   = self.render-conditions($placeholders, $conditions, 'HAVING');
-		'GROUP BY', $group-by, |@having;
-	}
-	multi method render-group-by(Placeholders $placeholders, Columns:U $columns, Conditions $having --> List) {
-		Empty;
-	}
-
-	multi method render-returning(Placeholders $placeholders, Columns:D $returning --> List) {
-		'RETURNING', self.render-columns($placeholders, $returning);
-	}
-	multi method render-returning(Placeholders $placeholders, Columns:U $returning --> List) {
-		Empty;
-	}
-
-	multi method render-limit(Int:D $limit, Int:D $offset --> Str) {
-		"LIMIT $limit OFFSET $offset";
-	}
-	multi method render-limit(Int:D $limit, Int:U $offset --> Str) {
-		"LIMIT $limit";
-	}
-	multi method render-limit(Int:U $limit, Int $offset --> List) {
-		Empty;
-	}
-
-	multi method render-locking(Locking:D $locking --> List) {
-		state @locking-key = ('UPDATE', 'NO KEY UPDATE', 'SHARE', 'KEY SHARE');
-		my @result = 'FOR', @locking-key[+$locking.strength];
-		@result.push('OF', self.render-table($locking.table)) with $locking.table;
-		@result.push('NOWAIT') if $locking.no-wait;
-		@result.push('SKIP LOCKED') if $locking.skip-locked;
-		@result;
-	}
-	multi method render-locking(Locking:U --> List) {
-		Empty;
-	}
-
-	method render-common-table(Placeholders $placeholders, Source::Renamed $rename) {
+	method render-common-table(Placeholders $placeholders, Common::Rename $rename --> List) {
 		my $alias      = self.render-table($rename.alias);
-		my $expression = self.render-source($placeholders, $rename.source);
-		"$alias AS $expression";
+		my $expression = self.render-expression($placeholders, $rename.keyword, Precedence::Comma);
+		$alias, 'AS', $expression;
 	}
 
 	multi method render-common-tables(Placeholders $placeholders, Common:D $common --> List) {
@@ -1148,118 +1414,293 @@ class Renderer::SQL does Renderer {
 		Empty;
 	}
 
-	multi method render-union(Placeholders $placeholders, Union:D $union --> List) {
-		my $type = $union.all ?? 'ALL' !! 'DISTINCT';
-		my $next = self.render-select-expression($placeholders, $union.next, :!allow-order);
-		"UNION", $type, parenthesize-if($next, $union.next.order-by);
+	method render-row(Placeholders $placeholders, Row $row --> Str) {
+		self.render-list($placeholders, $row.elements, True);
 	}
-	multi method render-union(Placeholders $placeholders, Union:U --> List) {
+
+	multi method render-conditions(Placeholders $placeholders, Conditional:D $conditions, Str $type = 'WHERE' --> List) {
+		$type, self.render-expression($placeholders, $conditions.expression, Precedence::And);
+	}
+	multi method render-conditions(Placeholders $placeholders, Conditional:U $conditions, Str $type = Str --> List) {
 		Empty;
 	}
 
-	multi method render-select-expression(Placeholders $placeholders, Select $select --> Str) {
+	multi method render-sorter(Placeholders $placeholders, Column $column --> Str) {
+		self.render-column($placeholders, $column);
+	}
+	multi method render-sorter(Placeholders $placeholders, Sorter::Modifier $column --> Str) {
+		"{ self.render-column($placeholders, $column.column) } $column.order()";
+	}
+
+	multi method render-group-by(Placeholders $placeholders, Column::Expressions:D $columns, Conditions $conditions --> List) {
+		my @group-by = self.render-columns($placeholders, $columns, 'GROUP BY');
+		my @having   = self.render-conditions($placeholders, $conditions, 'HAVING');
+		|@group-by, |@having;
+	}
+	multi method render-group-by(Placeholders $placeholders, Column::Expressions:U $columns, Conditions $having --> List) {
+		Empty;
+	}
+
+	method render-window(Placeholders $placeholders, Window $window --> Str) {
+		"WINDOW $window.name() AS { self.render-window-definition($window.definition) }";
+	}
+
+	multi method render-windows(Placeholders $placeholders, Windows:D $windows --> List) {
+		$windows.windows.map({ self.render-window($placeholders, $^window) }).join(', ');
+	}
+	multi method render-windows(Placeholders $placeholders, Windows:U $windows --> List) {
+		Empty;
+	}
+
+	multi method render-compound(Placeholders $placeholders, Compound:D $compound --> List) {
+		my @type = $compound.all ?? 'ALL' !! Empty;
+		my $next = self.render-query($placeholders, $compound.next);
+		$compound.type.uc, |@type, $next;
+	}
+	multi method render-compound(Placeholders $placeholders, Compound:U --> List) {
+		Empty;
+	}
+
+	multi method render-order-by(Placeholders $placeholders, Sorters:D $sorters --> List) {
+		my @elems = $sorters.elems.map: { self.render-sorter($placeholders, $^column) };
+		'ORDER BY', @elems.join(', ');
+	}
+	multi method render-order-by(Placeholders $placeholders, Sorters:U $sorters --> List) {
+		Empty;
+	}
+
+	multi method render-limit-offset(Placeholders $placeholders, Limit $limit, Offset $offset --> List) {
+		my @result;
+		@result.push: 'LIMIT',  self.render-expression($placeholders, $limit.value,  Precedence::Termlike) with $limit;
+		@result.push: 'OFFSET', self.render-expression($placeholders, $offset.value, Precedence::Termlike) with $offset;
+		@result;
+	}
+
+	multi method render-locking(Locking:D $locking --> List) {
+		my @result = 'FOR', $locking.strength;
+		@result.push('OF', self.render-table($locking.table)) with $locking.table;
+		@result.push('NOWAIT') if $locking.no-wait;
+		@result.push('SKIP LOCKED') if $locking.skip-locked;
+		@result;
+	}
+	multi method render-locking(Locking:U --> List) {
+		Empty;
+	}
+
+	method render-query(Placeholders $placeholders, Select $select --> Str) {
 		my @parts;
-		@parts.push: self.render-common-tables($placeholders, $select.common-tables);
-		@parts.push: 'SELECT';
-		@parts.push: 'DISTINCT' if $select.distinct;
-		@parts.push: self.render-columns($placeholders, $select.columns);
-		@parts.push: 'FROM';
-		@parts.push: self.render-source($placeholders, $select.source);
-		@parts.push: self.render-conditions($placeholders, $select.where);
-		@parts.push: self.render-group-by($placeholders, $select.group-by, $select.having);
-		@parts.push: self.render-union($placeholders, $select.union);
-		@parts.push: self.render-order-by($placeholders, $select.order-by);
-		@parts.push: self.render-limit($select.limit, $select.offset);
-		@parts.push: self.render-locking($select.locking);
+		@parts.append: 'SELECT';
+		@parts.append: self.render-distinct($placeholders, $select.distinct);
+		@parts.append: self.render-columns($placeholders, $select.columns);
+		@parts.append: self.render-from($placeholders, $select.source);
+		@parts.append: self.render-conditions($placeholders, $select.where);
+		@parts.append: self.render-group-by($placeholders, $select.group-by, $select.having);
+		@parts.append: self.render-compound($placeholders, $select.compound);
+		@parts.append: self.render-windows($placeholders, $select.windows);
 		@parts.join(' ');
 	}
 
-	method render-select(Select $command) {
-		my $placeholders = self.placeholders.new;
-		my $sql          = self.render-select-expression($placeholders, $command);
-		$sql, $placeholders.values;
+	multi method render-keyword-expression(Placeholders $placeholders, Select $select --> Str) {
+		my @parts;
+		@parts.append: self.render-common-tables($placeholders, $select.common-tables);
+
+		@parts.append: self.render-query($placeholders, $select);
+
+		@parts.append: self.render-order-by($placeholders, $select.order-by);
+		@parts.append: self.render-limit-offset($placeholders, $select.limit, $select.offset);
+		@parts.append: self.render-locking($select.locking);
+		@parts.join(' ');
 	}
 
-	method render-insert(Insert $insert) {
-		my $placeholders = self.placeholders.new;
-		my $target       = self.render-table($insert.target);
-		my $fields       = self.render-columns($placeholders, $insert.fields, True);
-		my $values       = self.render-values($placeholders, $insert.rows);
-		my @returning    = self.render-returning($placeholders, $insert.returning);
-		my $sql          = ('INSERT INTO', $target, $fields, 'VALUES', $values, |@returning).join(' ');
-		$sql, $placeholders.values;
+	multi method render-as(Table:D $alias --> List) {
+		'AS', self.render-table($alias);
+	}
+	multi method render-as(Table:U $alias --> List) {
+		Empty;
 	}
 
-	method render-update(Update $update) {
-		my $placeholders = self.placeholders.new;
+	method render-set(Placeholders $placeholders, Assigns:D $assigns) {
+		my @expressions = $assigns.pairs.map: -> (:$key, :$value) { Op::Assign.new($key, $value) }
+		my $set         = self.render-list($placeholders, @expressions, False);
+		'SET', $set
+	}
+
+	multi method render-update-values(Placeholders $placeholders, Update::Pairwise $update) {
+		self.render-set($placeholders, $update.set);
+	}
+	multi method render-update-values(Placeholders $placeholders, Update::Row $update) {
+		my $columns = self.render-columns($placeholders, $update.columns, True);
+		my $expression = self.render-row($placeholders, $update.row);
+		"SET $columns = $expression";
+	}
+	multi method render-update-values(Placeholders $placeholders, Update::Select $update) {
+		my $columns = self.render-columns($placeholders, $update.columns, :parenthesize);
+		my $select  = self.render-expression($placeholders, $update.select, Precedence::Assignment);
+		"SET $columns = $select";
+	}
+
+	multi method render-from(Placeholders $placeholders, Source:D $source, Str $prefix = 'FROM') {
+		$prefix, self.render-source($placeholders, $source);
+	}
+	multi method render-from(Placeholders $placeholders, Source:U $source, Str = Str) {
+		Empty;
+	}
+
+	multi method render-returning(Placeholders $placeholders, Column::Expressions:D $returning --> List) {
+		self.render-columns($placeholders, $returning, 'RETURNING');
+	}
+	multi method render-returning(Placeholders $placeholders, Column::Expressions:U $returning --> List) {
+		Empty;
+	}
+
+	multi method render-keyword-expression(Placeholders $placeholders, Update $update) {
+		my @common       = self.render-common-tables($placeholders, $update.common-tables);
 		my $target       = self.render-table($update.target);
-		my @expressions  = $update.set.pairs.map: -> (:$key, :$value) { Op::Assign.new($key, $value) }
-		my $set          = self.render-list($placeholders, @expressions, False);
+		my @only         = $update.only ?? 'ONLY' !! Empty;
+		my @as           = self.render-as($update.as);
+		my @set          = self.render-update-values($placeholders, $update);
+		my @from         = self.render-from($placeholders, $update.from);
 		my @where        = self.render-conditions($placeholders, $update.where);
 		my @returning    = self.render-returning($placeholders, $update.returning);
-		my $sql          = ('UPDATE', $target, 'SET', $set, |@where, |@returning).join(' ');
-		$sql, $placeholders.values;
+
+		(@common, 'UPDATE', @only, $target, @as, @set, @from, @where, @returning).flat.join(' ');
 	}
 
-	method render-delete(Delete $delete) {
-		my $placeholders = self.placeholders.new;
+	method render-rows(Placeholders $placeholders, Rows $rows) {
+		my @values = $rows.elems.map({ self.render-row($placeholders, $^row) });
+		@values.join(', ');
+	}
+
+	multi method render-insert-content(Placeholders $placeholders, Insert::Values $insert) {
+		'VALUES', self.render-rows($placeholders, $insert.rows);
+	}
+	multi method render-insert-content(Placeholders $placeholders, Insert::Select $insert) {
+		self.render-keyword-expression($placeholders, $insert.select);
+	}
+	multi method render-insert-content(Placeholders $placeholders, Insert::Defaults $insert) {
+		'DEFAULT VALUES';
+	}
+
+	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Columns:D $target) {
+		my $columns = self.render-columns($placeholders, $target.columns, :parenthesize);
+		my $where = self.render-conditions($placeholders, $target.where);
+		$columns, |@$where;
+	}
+	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Constraint:D $target) {
+		'ON CONSTRAINT', self.render-column($target.name);
+	}
+	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target:U $conflict) {
+		Empty;
+	}
+
+	multi method render-conflict(Placeholders $placeholders, Conflict::Update:D $conflict) {
+		my @result = 'ON CONFLICT';
+		@result.push: self.render-conflict-target($placeholders, $conflict.target);
+		@result.push: 'DO UPDATE';
+		@result.push: self.render-set($placeholders, $conflict.assigns);
+		@result.push: self.render-conditions($placeholders, $conflict.where);
+		@result;
+	}
+	multi method render-conflict(Placeholders $placeholders, Conflict::Nothing $conflict) {
+		my @result = 'ON CONFLICT';
+		@result.push: self.render-conflict-target($placeholders, $conflict.target);
+		@result.push: 'DO NOTHING';
+		@result;
+	}
+	multi method render-conflict(Placeholders $placeholders, Conflict:U $conflict) {
+		Empty;
+	}
+
+	multi method render-keyword-expression(Placeholders $placeholders, Insert $insert) {
+		my @common       = self.render-common-tables($placeholders, $insert.common-tables);
+		my $target       = self.render-table($insert.target);
+		my @as           = self.render-as($insert.as);
+		my @fields       = self.render-columns($placeholders, $insert.fields, :parenthesize);
+		my $content      = self.render-insert-content($placeholders, $insert);
+		my @conflict     = self.render-conflict($placeholders, $insert.conflict);
+		my @returning    = self.render-returning($placeholders, $insert.returning);
+
+		(@common, 'INSERT INTO', $target, @as, @fields, $content, @conflict, @returning).flat.join(' ');
+	}
+
+	multi method render-keyword-expression(Placeholders $placeholders, Delete $delete) {
+		my @common       = self.render-common-tables($placeholders, $delete.common-tables);
+		my @only         = $delete.only ?? 'ONLY' !! Empty;
 		my $target       = self.render-table($delete.target);
+		my @as           = self.render-as($delete.as);
+		my @using        = self.render-from($placeholders, $delete.using);
 		my @where        = self.render-conditions($placeholders, $delete.where);
 		my @returning    = self.render-returning($placeholders, $delete.returning);
-		my $sql          = ('DELETE FROM', $target, @where, @returning).flat.join(' ');
+
+		(@common, 'DELETE FROM', @only, $target, @as, @using, @where, @returning).flat.join(' ');
+	}
+
+	multi method render-keyword-expression(Placeholders $placeholders, Values $values) {
+		my $rows     = $values.render-rows($placeholders, $values.rows);
+		my @order-by = self.render-order-by($placeholders, $values.order-by);
+		my @limits   = self.render-limit-offset($placeholders, $values.limit, $values.offset);
+
+		('VALUES', $rows, @order-by, @limits).flat.join(' ');
+	}
+
+	method render-keyword(Command $command) {
+		my $placeholders = self.placeholders.new;
+		my $sql          = self.render-keyword-expression($placeholders, $command);
 		$sql, $placeholders.values;
 	}
-}
-
-class Renderer::SQL::Postgres is Renderer::SQL {
-	multi method render-expression(Placeholders $placeholders, Op::Cast $cast --> Str) {
-		self.render-expression($placeholders, $cast.primary, Precedence::TermLike) ~ '::' ~ $cast.type;
-	}
-}
-
-role Renderer::Bare does Renderer {
-}
-
-class Renderer::Noop does Renderer::Bare {
-	method render-select(Select $select --> Select) { $select }
-	method render-insert(Insert $insert --> Insert) { $insert }
-	method render-update(Update $update --> Update) { $update }
-	method render-delete(Delete $delete --> Delete) { $delete }
 }
 
 has Renderer:D $.renderer is required;
 
 multi submethod BUILD(Renderer:D :$!renderer!) {}
-multi submethod BUILD(Placeholders:U :$placeholders!, Renderer::SQL:U :$renderer = Renderer::SQL, *%arguments) {
-	$!renderer = $renderer.new(:$placeholders, |%arguments);
-}
-multi submethod BUILD(Renderer::Bare:U :$renderer!, *%arguments) {
+multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 
-method select(Source:D(Any:D) $source, Columns:D(Any:D) $columns = *, Conditions(Any) $where?, Bool :$render = True, *%arguments) {
-	my $select = Select.new(:$columns, :$source, :$where, |%arguments);
-	$render ?? $!renderer.render-select($select) !! $select;
+method select(Source:D(Any:D) $source, |arguments) {
+	my $select = $source.select(|arguments);
+	$!renderer.render-keyword($select);
 }
 
-multi method insert(Table:D(Cool:D) $target, Columns:D(Any:D) $fields, Rows:D(Any:D) $rows, Columns(Any) :$returning) {
-	my $insert = Insert.new(:$target, :$fields, :$rows, :$returning);
-	$!renderer.render-insert($insert);
-}
-multi method insert(Table:D(Cool:D) $target, Assigns:D(Hash:D) $values, Columns(Any) :$returning) {
-	my Columns(List) $fields = $values.keys;
-	my Rows(List) $rows = [$values.values,];
-	samewith($target, $fields, $rows, :$returning);
+method insert(Table:D(Cool:D) $target, |arguments) {
+	my $insert = $target.insert(|arguments);
+	$!renderer.render-keyword($insert);
 }
 
-method update(Table:D(Cool:D) $target, Assigns:D(Hash:D) $set, Conditions(Any) $where?, Columns(Any) :$returning) {
-	my $update = Update.new(:$target, :$set, :$where, :$returning);
-	$!renderer.render-update($update);
+method update(Table:D(Cool:D) $target, |arguments) {
+	my $update = $target.update(|arguments);
+	$!renderer.render-keyword($update);
 }
 
-method delete(Table:D(Cool:D) $target, Conditions(Any) $where?, Columns(Any) :$returning) {
-	my $delete = Delete.new(:$target, :$where, :$returning);
-	$!renderer.render-delete($delete);
+method delete(Table:D(Cool:D) $target, |arguments) {
+	my $delete = $target.delete(|arguments);
+	$!renderer.render-keyword($delete);
+}
+
+multi method table(Table:D(Cool:D) $table) {
+	$table;
+}
+multi method table(Table:D(Cool:D) $table, Table:D(Cool:D) :$as!) {
+	$table.as($as);
+}
+multi method table(Table:D(Cool:D) $table, Pair :$as!) {
+	$table.as($as.key, $as.value);
+}
+
+method value(Placeholder(Any) $value) {
+	$value;
+}
+
+method begin() {
+	'BEGIN', [];
+}
+
+method rollback() {
+	'ROLLBACK',  [];
+}
+
+method commit() {
+	'COMMIT', [];
 }
 
 =begin pod
@@ -1283,7 +1724,7 @@ my $result = $dbh.query($sql, @arguments);
 
 =head1 Description
 
-SQL::Abstract abstracts the generation of SQL queries.
+SQL::Abstract abstracts the generation of SQL queries. Fundamentally its functionality is 
 
 =head1 Class SQL::Abstract
 
@@ -1303,7 +1744,7 @@ SQL::Abstract::Placeholders::Postgres
 This will use Postgres style C<($1, $2)> for placeholders.
 =end item1
 
-=head2 select($source, $columns?, $where?, :$distinct, :$group-by, :$having?, :$order-by, :$limit, :$offset, :$locking)
+=head2 select($source, $columns?, $where?, :$distinct, :$group-by, :$having, :$order-by, :$limit, :$offset, :$locking)
 
 This will generate a C<SELECT> query.
 
@@ -1332,7 +1773,7 @@ This will select from the table in the pair value, and rename it to the key of t
 =end item1
 
 =begin item1
-SQL::Abstract::Columns(Any:D) $columns = *
+SQL::Abstract::Column::Expressions(Any:D) $columns = *
 
 This will contain the requested columns. It 
 
@@ -1387,7 +1828,7 @@ Bool :$distinct
 =end item1
 
 =begin item1
-SQL::Abstract::Columns(Any) :$group-by,
+SQL::Abstract::Column::Expressions(Any) :$group-by,
 
 Group by the listed columns. They're interpreted the same as C<$columns> is interpreted.
 =end item1
@@ -1401,7 +1842,7 @@ This will be the C<HAVING> conditions. it works described below in the Condition
 =begin item1
 Sorters(Any) :$order-by,
 
-This sorts the rows by the listed columns. This is interpreted the same as C<$columns>, except C<*> isn't allowed, simple numbers may be interpreted as column numbers by your database, and it also allows one to use C<SQL::Abstract::Sorter::Asc>/C<SQL::Abstract::Sorter::Desc> to specify the sorting order.
+This sorts the rows by the listed columns. This is interpreted the same as C<$columns>, except C<*> isn't allowed, simple numbers may be interpreted as column numbers by your database, and it also allows one to use C<SQL::Abstract::Sorter::Modifier::Asc>/C<SQL::Abstract::Sorter::Desc> to specify the sorting order.
 =end item1
 
 =begin item1
@@ -1426,7 +1867,7 @@ This sets the locking clause of the query. Portable values for this include:
 
 =end item1
 
-=head2 update(Table(Cool) $target, Assigns(Hash) $set, Conditions(Any) $where?, Columns(Any) :$returning) {
+=head2 update(Table(Cool) $target, Assigns(Cool) $set, Conditions(Any) $where?, Column::Expressions(Any) :$returning) {
 
 =begin item1
 Table(Cool) $target
@@ -1435,7 +1876,7 @@ This works
 =end item1
 
 =begin item1
-Assigns(Hash) $set
+Assigns(Cool) $set
 
 =end item1
 
@@ -1445,15 +1886,15 @@ Conditions(Any) $where?,
 =end item1
 
 =begin item1
-Columns(Any) :$returning
+Column::Expressions(Any) :$returning
 
 =end item1
 
-=head2 insert(Table(Cool) $target, Columns(Any) $fields, Rows(Any) $rows, Columns(Any) :$returning)
+=head2 insert(Table(Cool) $target, Column::Expressions(Any) $fields, Rows(Any) $rows, Column::Expressions(Any) :$returning)
 
-=head2 insert(Table(Cool) $target, Assigns(Hash) $values, Columns(Any) :$returning) {
+=head2 insert(Table(Cool) $target, Assigns(Hash) $values, Column::Expressions(Any) :$returning) {
 
-=head2 delete(Table(Cool) $target, Conditions(Any) $where?, Columns(Any) :$returning) {
+=head2 delete(Table(Cool) $target, Conditions(Any) $where?, Column::Expressions(Any) :$returning) {
 
 =head1 Conditions
 
