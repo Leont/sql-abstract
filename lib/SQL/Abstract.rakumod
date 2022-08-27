@@ -23,7 +23,7 @@ class Literal does Expression {
 	has Str:D $.payload is required;
 	has Any:D @.arguments;
 
-	method new(Str:D $payload, @arguments) {
+	method new(Str:D $payload, @arguments?) {
 		self.bless(:$payload, :@arguments);
 	}
 }
@@ -45,8 +45,6 @@ class Placeholder does Term {
 }
 
 role Constant[Str $keyword] does Term {
-	method keyword(--> Str) { $keyword }
-
 	method Str() { $keyword }
 
 	method WHICH() {
@@ -110,11 +108,7 @@ class Expression::Renamed does Expression {
 	has Identifier:D $.alias is required;
 	has Expression:D $.source is required;
 
-	proto method new(|) { * }
-	multi method new(Expression $source, Identifier(Cool) $alias) {
-		self.bless(:$source, :$alias);
-	}
-	multi method new(Identifier(Cool) $source, Identifier(Cool) $alias) {
+	method new(Expression $source, Identifier $alias) {
 		self.bless(:$source, :$alias);
 	}
 
@@ -194,28 +188,6 @@ class Expression::List {
 	}
 }
 
-class Source::Function { ... }
-
-class Function does Term {
-	has Str:D $.name is required;
-	has Expression @.arguments;
-
-	proto method new(|) { * }
-	multi method new(Str $name) {
-		self.bless(:$name);
-	}
-	multi method new(Str $name, Expression $arguments) {
-		self.bless(:$name, :arguments[$arguments]);
-	}
-	multi method new(Str $name, Expression @arguments) {
-		self.bless(:$name, :@arguments);
-	}
-
-	method as(Identifier:D(Cool:D) $alias, Identifiers(Any) $columns?, Bool :$lateral, Bool :$ordinal) {
-		Source::Function.new(self, $alias, $columns, :$lateral, :$ordinal);
-	}
-}
-
 role Op::Unary does Expression {
 	has Expression:D $.value is required;
 
@@ -291,8 +263,12 @@ role Op::Comperative[Str $operator] does Op::Binary {
 	method operator(--> Str) { $operator }
 }
 
-class Op::Equals does Op::Comperative['='] {}
 class Op::Unequals does Op::Comperative['<>'] {}
+class Op::Equals does Op::Comperative['='] {
+	method negate() {
+		Op::Unequals.new($!left, $!right);
+	}
+}
 
 class Op::LessThan does Op::Comperative['<'] {}
 class Op::GreaterOrEqual does Op::Comperative['>='] {}
@@ -537,7 +513,7 @@ class Conditions does Conditional {
 		self.new(expand-condition($pair));
 	}
 	multi method COERCE(@list) {
-		self.new(@list».&expand-condition);
+		self.new(@list.map(&expand-condition));
 	}
 	multi method COERCE(%hash) {
 		samewith(%hash.sort);
@@ -547,16 +523,16 @@ class Conditions does Conditional {
 class Order::Modifier does Expression {
 	method precedence(--> Precedence::Comma) {}
 
-	my enum Order (:Asc<ASC> :Desc<DESC>);
+	enum Sorting (:Asc<ASC> :Desc<DESC>);
 	has Expression:D $.column is required;
-	has Order:D $.order is required;
+	has Sorting:D $.order is required;
 
 	proto method new(|) { * }
-	multi method new(Expression $column, Order $order) {
+	multi method new(Expression $column, Sorting $order) {
 		self.bless(:$column, :$order);
 	}
 	multi method new(Expression $column, Str $order-name) {
-		my $order = Order.WHO{$order-name.lc.tc};
+		my $order = Sorting.WHO{$order-name.lc.tc};
 		self.bless(:$column, :$order);
 	}
 
@@ -575,7 +551,7 @@ class OrderBy {
 		self.bless(:@elems);
 	}
 
-	my multi sorter(Expression:D $expression) {
+	my multi to-sorter(Expression:D $expression) {
 		$expression;
 	}
 	my multi to-sorter(Identifier:D(Cool:D) $ident) {
@@ -604,7 +580,7 @@ class Row does Expression {
 	}
 
 	method COERCE(@values) {
-		my Expression @expressions = @values».&expand-expression;
+		my Expression @expressions = @values.map(&expand-expression);
 		self.new(@expressions);
 	}
 }
@@ -627,11 +603,11 @@ class Assigns {
 		$column => $expression;
 	}
 	multi method COERCE(@list) {
-		my @pairs = @list.unique(:as(*.key))».&transform-pair;
+		my @pairs = @list.unique(:as(*.key)).map(&transform-pair);
 		self.bless(:@pairs);
 	}
 	multi method COERCE(%set) {
-		my @pairs = %set.sort(*.key)».&transform-pair;
+		my @pairs = %set.sort(*.key).map(&transform-pair);
 		self.bless(:@pairs);
 	}
 
@@ -643,25 +619,45 @@ class Assigns {
 	}
 }
 
-class Window::Definition {
-	has Identifier $.existing;
-	has Expression::List $.columns;
-	has OrderBy $.order-by;
+class Window::Function { ... }
+class Source::Function { ... }
 
-	method is-simple() {
-		$!existing && !$!columns && !$!order-by;
+class Function does Term {
+	has Str:D $.name is required;
+	has Expression::List:D $.arguments is required;
+
+	method new(Str $name, Expression::List $arguments) {
+		self.bless(:$name, :$arguments);
+	}
+
+	method over(Conditions(Any) :$filter, Expression::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier :$existing) {
+		Window::Function.new(self, :$filter, :$partition-by, :$order-by, :$existing);
+	}
+
+	method as(Identifier:D(Cool:D) $alias, Identifiers(Any) $columns?, Bool :$lateral, Bool :$ordinal) {
+		Source::Function.new(self, $alias, $columns, :$lateral, :$ordinal);
 	}
 }
 
-class Function::Window does Expression {
+class Window::Definition {
+	has Identifier $.existing;
+	has Expression::List $.partition-by;
+	has OrderBy $.order-by;
+
+	method is-simple() {
+		$!existing && !$!partition-by && !$!order-by;
+	}
+}
+
+class Window::Function does Expression {
 	method precedence(--> Precedence::Comma) {}
 
 	has Function:D $.function is required;
 	has Conditions $.filter;
 	has Window::Definition:D $.window is required;
 
-	method new(Function:D(Cool:D) $function, Conditions(Any) :$filter, Expression::List(Any) :$columns, OrderBy(Any) :$order-by, Identifier :$existing) {
-		my $window = Window::Definition.new(:$existing, :$columns, :$order-by);
+	method new(Function:D $function, Conditions :$filter, Expression::List :$partition-by, OrderBy :$order-by, Identifier :$existing) {
+		my $window = Window::Definition.new(:$existing, :$partition-by, :$order-by);
 		self.bless(:$function, :$filter, :$window);
 	}
 }
@@ -682,193 +678,6 @@ class Windows {
 	}
 }
 
-role Keyword does Expression {
-	method precedence() { Precedence::Rowlike }
-}
-
-class Table { ... }
-class Join::On { ... }
-class Join::On::Conditions { ... }
-class Join::Using { ... }
-class Table::Renamed { ... }
-class Select { ... }
-
-class Source does Expression {
-	method precedence(--> Precedence::Rowlike) {}
-
-	multi submethod COERCE(Cool $pre-source) {
-		Table.new($pre-source);
-	}
-	multi submethod COERCE(Pair $pair) {
-		Table::Renamed.COERCE($pair);
-	}
-
-	multi method join(Source:D(Any:D) $right, Join::On::Conditions(Any) :$on!, *%arguments) {
-		Join::On.new(self, $right, $on, |%arguments);
-	}
-	multi method join(Source:D(Any:D) $right, Identifiers(Any) :$using!, *%arguments) {
-		Join::Using.new(self, $right, $using, |%arguments);
-	}
-	multi method join(Source:D(Any:D) $right, Bool :$natural!, *%arguments) {
-		Join::Natural.new(self, $right, |%arguments);
-	}
-	multi method join(Source:D(Any:D) $right, Bool :$cross!, *%arguments) {
-		Join::Cross.new(self, $right, |%arguments);
-	}
-
-	method select(Expression::List:D(Any:D) $columns = *, Conditions(Any) $where?, *%arguments) {
-		Select.new(:$columns, :source(self), :$where, |%arguments);
-	}
-}
-
-class Insert::Values { ... }
-class Insert::Select { ... }
-class Insert::Defaults { ... }
-class Update::Pairwise { ... }
-class Update::Row      { ... }
-class Update::Select { ... }
-class Delete { ... }
-
-class Table is Source does Keyword {
-	has Identifier:D $.name is required;
-	has Bool          $.only;
-
-	method new(Identifier(Cool:D) $name, Bool :$only) {
-		self.bless(:$name, :$only);
-	}
-
-	method COERCE(Pair $ (:$key, Source(Any) :$value)) {
-		Table::Renamed.new($value, $key);
-	}
-
-	multi method update(Assigns:D(Any:D) $assigns, Conditions(Any) $where?, *%arguments) {
-		Update::Pairwise.new(:target(self), :$assigns, :$where, |%arguments);
-	}
-	multi method update(Identifiers:D(Any:D) $columns, Row $row, Conditions(Any) $where?, *%arguments) {
-		Update::Row.new(:target(self), :$columns, :$row, :$where, |%arguments);
-	}
-	multi method update(Identifiers:D(Any:D) $columns, Select:D $select, Conditions(Any) $where?, *%arguments) {
-		Update::Select.new(:target(self), :$columns, :$select, :$where, |%arguments);
-	}
-
-	multi method insert(Identifiers(Any) $fields, Rows:D(List:D) $rows, *%arguments) {
-		Insert::Values.new(:target(self), :$fields, :$rows, |%arguments);
-	}
-	multi method insert(Assigns:D(Cool:D) $values, *%arguments) {
-		samewith($values.keys, [$values.values,], |%arguments);
-	}
-	multi method insert(Identifiers(Any) $fields, Select $select, *%arguments) {
-		Insert::Select.new(:target(self), :$fields, :$select, |%arguments);
-	}
-	multi method insert(Value::Default, *%arguments) {
-		Insert::Defaults.new(:target(self), |%arguments);
-	}
-
-	method delete(Conditions(Any) $where?, *%arguments) {
-		Delete.new(:target(self), :$where, |%arguments);
-	}
-
-	multi method as(Identifier:D(Cool:D) $alias) {
-		Table::Renamed.new(self, $alias);
-	}
-	multi method as(Identifier:D(Cool:D) $alias, Identifiers(Any) $columns) {
-		Table::Renamed.new(self, $alias, $columns);
-	}
-	multi method as(Pair $pair) {
-		Table::Renamed.new(self, $pair.key, $pair.value);
-	}
-
-	multi method concat(Identifier $column) {
-		Identifier.new($!name.concat($column.name));
-	}
-	multi method concat(Identifier @names) {
-		@names.map: { self.concat($^name) };
-	}
-}
-
-role Source::Aliased is Source {
-	has Identifier:D $.alias is required;
-	has Identifiers $.columns;
-}
-
-class Table::Renamed is Table does Source::Aliased {
-	method new(Table:D $table, Identifier:D(Cool:D) $alias, Identifiers(Any) $columns?) {
-		self.bless(:name($table.name), :only($table.only), :$alias, :$columns);
-	}
-
-	method COERCE(Pair $ (:$key, Table(Any) :$value)) {
-		self.new($value, $key);
-	}
-}
-
-class Join is Source {
-	enum Type <Inner Left Right Outer>;
-
-	has Source:D $.left is required;
-	has Source:D $.right is required;
-	has Type:D $.type = Type::Inner;
-}
-
-class Join::On::Conditions does Conditional {
-	sub expand(Pair $pair (Identifier(Cool) :$key, Identifier(Cool) :$value)) {
-		Op::Equals.new($key, $value);
-	}
-
-	multi method COERCE(Conditions $conditions) {
-		self.new($conditions.expression);
-	}
-	multi method COERCE(%hash) {
-		self.new(%hash.sort(*.key)».&expand);
-	}
-}
-class Join::On is Join {
-	has Join::On::Conditions $.on;
-
-	method new(Source:D(Any:D) $left, Source:D(Any:D) $right, Join::On::Conditions:D(Any:D) $on, Join::Type :$type = Join::Type::Inner) {
-		self.bless(:$left, :$right, :$on, :$type);
-	}
-}
-
-class Join::Using is Join {
-	has Identifiers $.using;
-	method new(Source:D(Any:D) $left, Source:D(Any:D) $right, Identifiers(Any) $using, Join::Type :$type = Join::Type::Inner) {
-		self.bless(:$left, :$right, :$using, :$type);
-	}
-}
-
-class Join::Natural is Join {
-	method new(Source:D(Any:D) $left, Source:D(Any:D) $right, Join::Type :$type = Join::Type::Inner) {
-		self.bless(:$left, :$right, :$type);
-	}
-}
-
-class Join::Cross is Join {
-	method new(Source:D(Any:D) $left, Source:D(Any:D) $right) {
-		self.bless(:$left, :$right);
-	}
-}
-
-role Source::Nested does Source::Aliased {
-	has Bool $.lateral;
-}
-
-class Source::Query does Source::Nested {
-	has Keyword:D $.keyword is required;
-
-	multi method new(Keyword:D $keyword, Identifier:D(Cool:D) $alias, Identifiers(Any) $columns?, Bool :$lateral) {
-		self.bless(:$keyword, :$alias, :$columns, :$lateral);
-	}
-}
-
-class Source::Function does Source::Nested {
-	has Function:D $.function is required;
-	has Bool       $.ordinal;
-
-	multi method new(Function:D $function, Identifier:D(Cool:D) $alias, Identifiers $columns?, Bool :$lateral, Bool :$ordinal) {
-		self.bless(:$function, :$alias, :$columns, :$lateral, :$ordinal);
-	}
-}
-
 class Locking {
 	enum Strength (:Update<UPDATE> :NoKeyUpdate('NO KEY UPDATE') :Share<SHARE> :KeyShare('KEY SHARE'));
 
@@ -877,7 +686,7 @@ class Locking {
 	has Bool $.no-wait;
 	has Bool $.skip-locked;
 
-	method new(Strength:D $strength, Identifier(Cool) $table?, Bool :$no-wait, Bool :$skip-locked) {
+	method new(Strength:D $strength, Identifier $table?, Bool :$no-wait, Bool :$skip-locked) {
 		self.bless(:$strength, :$table, :$no-wait, :$skip-locked);
 	}
 
@@ -885,11 +694,13 @@ class Locking {
 		my $strength = Strength.WHO{$name.lc.tc};
 		self.new($strength);
 	}
-	multi method COERCE(Pair $ (:$key, :$value)) {
-		my $strength = Strength.WHO{$key.lc.tc};
+	multi method COERCE(Pair $ (:$key, Identifier(Cool) :$value)) {
+		my $strength = $key ~~ Strength ?? $key !! Strength.WHO{$key.lc.tc};
 		self.new($strength, $value);
 	}
 }
+
+class Select { ... }
 
 class Compound {
 	enum Type <Union Intersect Except>;
@@ -938,6 +749,26 @@ class Offset {
 	}
 }
 
+class Source::Query { ... }
+role Keyword does Expression {
+	method precedence(--> Precedence::Rowlike) {}
+
+	method as(Identifier:D(Cool:D) $alias, Bool :$lateral) {
+		Source::Query.new(self, $alias, :$lateral);
+	}
+}
+
+class Values does Keyword {
+	has Rows:D  $.rows is required;
+	has OrderBy $.order-by;
+	has Limit   $.limit;
+	has Offset  $.offset;
+
+	method values(Rows:D(List:D) $rows, OrderBy :$order-by, Limit :$limit, Offset :$offset) {
+		self.bless(:$rows, :$order-by, :$limit, :$offset);
+	}
+}
+
 class Common {
 	class Name {
 		has Identifier:D $.name is required;
@@ -982,17 +813,6 @@ role Keyword::Common does Keyword {
 	has Common(Any)      $.common-tables;
 }
 
-class Values does Keyword {
-	has Rows:D  $.rows is required;
-	has OrderBy $.order-by;
-	has Limit   $.limit;
-	has Offset  $.offset;
-
-	method values(Rows:D(List:D) $rows, OrderBy :$order-by, Limit :$limit, Offset :$offset) {
-		self.bless(:$rows, :$order-by, :$limit, :$offset);
-	}
-}
-
 class Distinct::Full { ... }
 class Distinct::Columns { ... }
 
@@ -1025,59 +845,68 @@ class GroupBy {
 	}
 }
 
-class Select does Keyword::Common does Expression {
-	has Expression::List(Any) $.columns;
-	has Distinct(Any)    $.distinct;
-	has Source(Any)      $.source;
-	has Conditions(Any)  $.where;
-	has GroupBy(Any)     $.group-by;
-	has Conditions(Any)  $.having;
-	has Windows          $.windows;
-	has Compound(Pair)   $.compound;
+class Source { ... }
+class Table { ... }
 
-	has OrderBy(Any)     $.order-by;
-	has Limit(Any)       $.limit;
-	has Offset(Any)      $.offset;
-	has Locking(Any)     $.locking;
+class Select does Keyword::Common {
+	has Expression::List:D $.columns is required;
+	has Distinct           $.distinct;
+	has Source             $.source;
+	has Conditions         $.where;
+	has GroupBy            $.group-by;
+	has Conditions         $.having;
+	has Windows            $.windows;
+	has Compound           $.compound;
 
-	method as(Identifier:D(Cool:D) $alias, Bool :$lateral) {
-		Source::Query.new(self, $alias, :$lateral);
-	}
+	has OrderBy            $.order-by;
+	has Limit              $.limit;
+	has Offset             $.offset;
+	has Locking            $.locking;
 }
 
 role Update does Keyword::Common {
-	has Table:D(Any:D)           $.target is required;
-	has Source(Any)              $.from;
-	has Conditions(Any)          $.where;
-	has Expression::List(Any) $.returning;
+	has Table:D          $.target is required;
+	has Source           $.from;
+	has Conditions       $.where;
+	has Expression::List $.returning;
 }
 
 role Updater::Pairwise {
-	has Assigns:D(Cool:D) $.assigns is required;
+	has Assigns:D $.assigns is required;
 }
 class Update::Pairwise does Update does Updater::Pairwise {}
 
 role Updater::Row {
-	has Identifiers:D(Any) $.columns;
-	has Row(Cool)            $.row is required;
+	has Identifiers:D $.columns is required;
+	has Row           $.row is required;
 }
 class Update::Row does Update does Updater::Row {}
 
 role Updater::Select {
-	has Identifiers:D(Any) $.columns;
-	has Select:D             $.select is required;
+	has Identifiers:D $.columns is required;
+	has Select:D      $.select is required;
 }
 class Update::Select does Update does Updater::Select {}
 
 enum Overriding <System User>;
 
-role Conflict::Target {}
+class Conflict::Target::Columns { ... }
+class Conflict::Target::Constraint { ... }
+
+role Conflict::Target {
+	multi method COERCE(Pair $ (:$key where 'columns', Identifiers:D(Any:D) :$value)) {
+		Conflict::Target::Columns.new($value);
+	}
+	multi method COERCE(Pair $ (:$key where 'constraint', Identifier:D(Cool:D) :$value)) {
+		Conflict::Target::Columns.new($value);
+	}
+}
 
 class Conflict::Target::Columns does Conflict::Target {
 	has Identifiers:D $.columns is required;
 	has Conditions      $.where;
 
-	method new(Identifiers:D(Any) $columns, Conditions(Any) $where?) {
+	method new(Identifiers:D $columns, Conditions $where?) {
 		self.bless(:$columns, :$where);
 	}
 }
@@ -1090,12 +919,19 @@ class Conflict::Target::Constraint does Conflict::Target {
 }
 
 class Conflict::Nothing { ... }
+role Conflict::Update { ... }
 
 role Conflict {
 	has Conflict::Target $.target;
 
 	multi submethod COERCE(Str $string where $string.lc eq 'nothing') {
 		Conflict::Nothing.new;
+	}
+	multi submethod COERCE(Pair $ (Conflict::Target(Pair) :$key, :$value where 'nothing')) {
+		Conflict::Nothing.new($key);
+	}
+	multi submethod COERCE(Pair $ (Conflict::Target(Pair) :$key, :$value)) {
+		Conflict::Update.COERCE(($key => $value));
 	}
 }
 
@@ -1105,41 +941,47 @@ class Conflict::Nothing does Conflict {
 	}
 }
 
+class Conflict::Update::Pairwise { ... }
 role Conflict::Update does Conflict {
-	has Conditions(Any)   $.where;
+	has Conditions $.where;
+
+	multi submethod COERCE(Pair $ (:$key, Assigns:D(Cool:D) :$value)) {
+		Conflict::Update::Pairwise.new($key, $value);
+	}
+	multi submethod COERCE(Pair $ (:$key, Row:D :$value)) {
+	}
+	multi submethod COERCE(Pair $ (:$key, Select:D :$value)) {
+	}
 }
 
 class Conflict::Update::Pairwise does Conflict::Update does Updater::Pairwise {
-	multi method new(Conflict::Target:D $target, Assigns:D(Cool:D) $assigns, Conditions(Any) $where?) {
-		self.bless(:$target, :$where, :$assigns);
-	}
-	multi method new(Conflict::Target::Columns:D(Any) $target, Assigns:D(Cool:D) $assigns, Conditions(Any) $where?) {
+	method new(Conflict::Target:D $target, Assigns:D $assigns, Conditions $where?) {
 		self.bless(:$target, :$where, :$assigns);
 	}
 }
 
 class Conflict::Update::Row does Conflict::Update does Updater::Row {
-	multi method new(Conflict::Target:D $target, Row:D(Cool:D) $row, Conditions(Any) $where?) {
+	method new(Conflict::Target:D $target, Row:D $row, Conditions $where?) {
 		self.bless(:$target, :$where, :$row);
 	}
 }
 
 class Conflict::Update::Select does Conflict::Update does Updater::Select {
-	multi method new(Conflict::Target:D $target, Select $select, Conditions(Any) $where?) {
+	method new(Conflict::Target:D $target, Select $select, Conditions $where?) {
 		self.bless(:$target, :$where, :$select);
 	}
 }
 
 role Insert does Keyword::Common {
-	has Table:D(Any:D)     $.target is required;
-	has Identifiers(Any) $.fields;
-	has Overriding         $.overriding;
-	has Conflict(Any)      $.conflict;
-	has Expression::List(Any) $.returning;
+	has Table:D          $.target is required;
+	has Identifiers      $.fields;
+	has Overriding       $.overriding;
+	has Conflict         $.conflict;
+	has Expression::List $.returning;
 }
 
 class Insert::Values does Insert {
-	has Rows:D(List:D)     $.rows is required;
+	has Rows:D $.rows is required;
 }
 
 class Insert::Select does Insert {
@@ -1150,10 +992,179 @@ class Insert::Defaults does Insert {
 }
 
 class Delete does Keyword::Common {
-	has Table:D(Any:D)           $.target is required;
-	has Source(Any)              $.using;
-	has Conditions(Any)          $.where;
-	has Expression::List(Any) $.returning;
+	has Table:D          $.target is required;
+	has Source           $.using;
+	has Conditions       $.where;
+	has Expression::List $.returning;
+}
+
+class Join::On { ... }
+class Join::Conditions { ... }
+class Join::Using { ... }
+class Table::Renamed { ... }
+
+enum Join::Type <Inner Left Right Outer>;
+
+class Source {
+	multi submethod COERCE(Cool $pre-source) {
+		Table.COERCE($pre-source);
+	}
+	multi submethod COERCE(Pair $pair) {
+		Table::Renamed.COERCE($pair);
+	}
+
+	multi method join(Source:D(Any:D) $right, Join::Conditions(Any) :$on!, Join::Type :$type = Join::Type::Inner) {
+		Join::On.new(:left(self), :$right, :$on, :$type);
+	}
+	multi method join(Source:D(Any:D) $right, Identifiers(Any) :$using!, Join::Type :$type = Join::Type::Inner) {
+		Join::Using.new(:left(self), :$right, :$using, :$type);
+	}
+	multi method join(Source:D(Any:D) $right, Bool :$natural!, Join::Type :$type = Join::Type::Inner) {
+		Join::Natural.new(:left(self), :$right, :$type);
+	}
+	multi method join(Source:D(Any:D) $right, Bool :$cross!) {
+		Join::Cross.new(:left(self), :$right);
+	}
+
+	method select(Expression::List:D(Any:D) $columns = *, Conditions(Any) $where?, Common(Any) :$common-tables, Distinct(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Windows :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) {
+		Select.new(:$common-tables, :$distinct, :$columns, :source(self), :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
+	}
+}
+
+class Table is Source does Keyword {
+	has Identifier:D $.name is required;
+	has Bool         $.only;
+
+	method new(Identifier:D $name, Bool :$only) {
+		self.bless(:$name, :$only);
+	}
+
+	multi method COERCE(Identifier:D(Cool:D) $name) {
+		self.new($name);
+	}
+	multi method COERCE(Pair $ (Identifier:D(Cool:D) :$key, Source(Any) :$value)) {
+		Table::Renamed.new($value, $key);
+	}
+
+	multi method update(Assigns:D(Any:D) $assigns, Conditions(Any) $where?, Source(Any) :$from, Expression::List(Any) :$returning) {
+		Update::Pairwise.new(:target(self), :$assigns, :$where, :$from, :$returning);
+	}
+	multi method update(Identifiers:D(Any:D) $columns, Row $row, Conditions(Any) $where?, Source(Any) :$from, Expression::List(Any) :$returning) {
+		Update::Row.new(:target(self), :$columns, :$row, :$where, :$from, :$returning);
+	}
+	multi method update(Identifiers:D(Any:D) $columns, Select:D $select, Conditions(Any) $where?, Source(Any) :$from, Expression::List(Any) :$returning) {
+		Update::Select.new(:target(self), :$columns, :$select, :$where, :$from, :$returning);
+	}
+
+	multi method insert(Identifiers(Any) $fields, Rows:D(List:D) $rows, Overriding :$overriding, Conflict(Any) :$conflict, Expression::List(Any) :$returning) {
+		Insert::Values.new(:target(self), :$fields, :$rows, :$overriding, :$conflict, :$returning);
+	}
+	multi method insert(Assigns:D(Cool:D) $values, Overriding :$overriding, Conflict(Any) :$conflict, Expression::List(Any) :$returning) {
+		samewith($values.keys, [$values.values,], :$overriding, :$conflict, :$returning);
+	}
+	multi method insert(Identifiers(Any) $fields, Select $select, Overriding :$overriding, Conflict(Any) :$conflict, Expression::List(Any) :$returning) {
+		Insert::Select.new(:target(self), :$fields, :$select, :$overriding, :$conflict, :$returning);
+	}
+	multi method insert(Value::Default, Overriding :$overriding, Conflict(Any) :$conflict, Expression::List(Any) :$returning) {
+		Insert::Defaults.new(:target(self), :$overriding, :$conflict, :$returning);
+	}
+
+	method delete(Conditions(Any) $where?, Source(Any) :$using, Expression::List(Any) :$returning) {
+		Delete.new(:target(self), :$where, :$using :$returning);
+	}
+
+	proto method as(|) { * }
+	multi method as(Identifier:D(Cool:D) $alias) {
+		Table::Renamed.new(self, $alias);
+	}
+	multi method as(Identifier:D(Cool:D) $alias, Identifiers(Any) $columns) {
+		Table::Renamed.new(self, $alias, $columns);
+	}
+	multi method as(Pair $pair) {
+		Table::Renamed.new(self, $pair.key, $pair.value);
+	}
+
+	multi method concat(Identifier $column) {
+		Identifier.new($!name.concat($column));
+	}
+	multi method concat(Identifiers $columns) {
+		$columns.elems.map: { self.concat($^column) };
+	}
+}
+
+role Source::Aliased is Source {
+	has Identifier:D $.alias is required;
+	has Identifiers $.columns;
+}
+
+class Table::Renamed is Table does Source::Aliased {
+	method new(Table:D $table, Identifier:D $alias, Identifiers $columns?) {
+		self.bless(:name($table.name), :only($table.only), :$alias, :$columns);
+	}
+
+	method COERCE(Pair $ (Identifier:D(Cool:D) :$key, Table(Any) :$value)) {
+		self.new($value, $key);
+	}
+}
+
+class Join is Source {
+	has Source:D $.left is required;
+	has Source:D $.right is required;
+}
+
+class Join::Conditions does Conditional {
+	sub expand(Pair $ (Identifier(Cool) :$key, Identifier(Cool) :$value)) {
+		Op::Equals.new($key, $value);
+	}
+
+	multi method COERCE(Conditions $conditions) {
+		self.new($conditions.expression);
+	}
+	multi method COERCE(Pair $pair) {
+		self.new([ expand($pair) ]);
+	}
+	multi method COERCE(@list) {
+		self.new(@list.map(&expand));
+	}
+	multi method COERCE(%hash) {
+		samewith(%hash.sort(*.key));
+	}
+}
+class Join::On is Join {
+	has Join::Type:D $.type is required;
+	has Join::Conditions $.on;
+}
+
+class Join::Using is Join {
+	has Join::Type:D $.type is required;
+	has Identifiers $.using;
+}
+
+class Join::Natural is Join {
+	has Join::Type:D $.type is required;
+}
+
+class Join::Cross is Join {}
+
+role Source::Nested does Source::Aliased {
+	has Bool $.lateral;
+}
+
+class Source::Query does Source::Nested {
+	has Keyword:D $.keyword is required;
+
+	multi method new(Keyword:D $keyword, Identifier:D $alias, Identifiers $columns?, Bool :$lateral) {
+		self.bless(:$keyword, :$alias, :$columns, :$lateral);
+	}
+}
+
+class Source::Function does Source::Nested {
+	has Function:D $.function is required;
+	has Bool       $.ordinal;
+
+	multi method new(Function:D $function, Identifier:D $alias, Identifiers $columns?, Bool :$lateral, Bool :$ordinal) {
+		self.bless(:$function, :$alias, :$columns, :$lateral, :$ordinal);
+	}
 }
 
 role Placeholders {
@@ -1213,16 +1224,16 @@ class Prepared {
 	multi resolve-value(%replacements, Any $value) {
 		$value;
 	}
-	multi resolve-value(%replacements, Delayed $ (:$identifier, :$type, :$has-default, :$default)) {
-		if %replacements{$identifier}:exists {
-			%replacements{$identifier};
-		} elsif $has-default {
-			$default;
+	multi resolve-value(%replacements, Delayed $delayed) {
+		if %replacements{$delayed.identifier}:exists {
+			%replacements{$delayed.identifier};
+		} elsif $delayed.has-default {
+			$delayed.default;
 		} else {
-			die "No value given for delayed value '$identifier'"
+			die "No value given for delayed value '$delayed.identifier()'"
 		}
 	}
-	method resolve(%replacements = {}) {
+	method resolve(%replacements?) {
 		@!arguments.map: { resolve-value(%replacements, $^element) };
 	}
 
@@ -1295,7 +1306,7 @@ class Renderer::SQL does Renderer {
 		~$integer.value;
 	}
 	multi method render-expression(Placeholders $placeholders, Constant $constant, Precedence --> Str) {
-		$constant.keyword;
+		~$constant;
 	}
 	multi method render-expression(Placeholders $placeholders, Parentheses $parentheses, Precedence --> Str) {
 		"({ self.render-expression($placeholders, $parentheses.inner, Precedence::Comma) })";
@@ -1320,7 +1331,7 @@ class Renderer::SQL does Renderer {
 		@result.join(' ');
 	}
 	multi method render-expression(Placeholders $placeholders, Function $function, Precedence --> Str) {
-		$function.name ~ self.render-expression-list($placeholders, $function.arguments, True);
+		$function.name ~ self.render-column-expressions($placeholders, $function.arguments, :parenthesize);
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Unary::Prefix::Tight $op, Precedence --> Str) {
 		my $primary = self.render-expression($placeholders, $op.value, Precedence::TightPrefix);
@@ -1367,16 +1378,16 @@ class Renderer::SQL does Renderer {
 
 	multi method render-window-definition(Placeholders $placeholders, Window::Definition $definition --> Str) {
 		my @inner;
-		@inner.push: self.render-expression($placeholders, $definition.existing) with $definition.existing;
-		@inner.push: self.render-column-expressions($placeholders, $definition.columns, 'PARTITION BY');
+		@inner.push: self.render-identifier($definition.existing) with $definition.existing;
+		@inner.push: self.render-column-expressions($placeholders, $definition.partition-by, 'PARTITION BY');
 		@inner.push: self.render-order-by($placeholders, $definition.order-by);
 		"({ @inner.join(' ') })";
 	}
 	multi method render-window-definition(Placeholders $placeholders, Window::Definition $definition where .is-simple --> Str) {
-		self.render-expression($placeholders, $definition.existing, Precedence::Comma);
+		self.render-identifier($definition.existing);
 	}
 
-	multi method render-expression(Placeholders $placeholders, Function::Window $column, Precedence --> Str) {
+	multi method render-expression(Placeholders $placeholders, Window::Function $column, Precedence --> Str) {
 		my @result;
 		@result.push: self.render-expression($placeholders, $column.function, Precedence::Comma);
 		@result.push: self.render-conditions($placeholders, $column.filter, 'FILTER WHERE');
@@ -1388,8 +1399,8 @@ class Renderer::SQL does Renderer {
 	multi method render-distinct(Placeholders $placeholders, Distinct::Columns:D $source --> List) {
 		'DISTINCT ON', self.render-expression-list($placeholders, $source.columns.elems, True);
 	}
-	multi method render-distinct(Placeholders $placeholders, Distinct::Full:D $source, --> List) {
-		'DISTINCT',;
+	multi method render-distinct(Placeholders $placeholders, Distinct::Full:D $source, --> Str) {
+		'DISTINCT';
 	}
 	multi method render-distinct(Placeholders $placeholders, Distinct:U $source --> List) {
 		Empty;
@@ -1404,17 +1415,17 @@ class Renderer::SQL does Renderer {
 		Empty;
 	}
 
-	multi method render-identifiers(Identifiers:D $columns, Bool :$parenthesize --> List) {
+	multi method render-identifiers(Identifiers:D $columns --> Str) {
 		my @elems = $columns.elems.map: { self.render-identifier($^column) };
-		parenthesize-if(@elems.join(', '), $parenthesize),;
+		"({ @elems.join(', ') })";
 	}
-	multi method render-identifiers(Identifiers:U $columns, Bool :$parenthesize --> List) {
+	multi method render-identifiers(Identifiers:U $columns --> List) {
 		Empty;
 	}
 
 	multi method render-source-alias(Source::Aliased $source) {
 		my $alias = self.render-identifier($source.alias);
-		my @columns = self.render-identifiers($source.columns, :parenthesize);
+		my @columns = self.render-identifiers($source.columns);
 		'AS', $alias, |@columns;
 	}
 
@@ -1435,8 +1446,7 @@ class Renderer::SQL does Renderer {
 	}
 	multi method render-source-nested(Placeholders $placeholders, Source::Function $function --> Str) {
 		my $result = self.render-expression($placeholders, $function.function, Precedence::Rowlike);
-		my @ordinality = $function.ordinal ?? 'WITH ORDINALITY' !! Empty;
-		$result, |@ordinality;
+		$function.ordinal ?? "$result WITH ORDINALITY" !! $result;
 	}
 
 	multi method render-source(Placeholders $, Table $table --> List) {
@@ -1462,7 +1472,7 @@ class Renderer::SQL does Renderer {
 		self.render-conditions($placeholders, $join.on, 'ON');
 	}
 	multi method render-join-condition(Placeholders $placeholders, Join::Using $join) {
-		'USING', self.render-identifiers($join.using, :parenthesize);
+		'USING', self.render-identifiers($join.using);
 	}
 	multi method render-join-condition(Placeholders $placeholders, Join $join) {
 		Empty;
@@ -1486,7 +1496,7 @@ class Renderer::SQL does Renderer {
 
 	method render-common-table(Placeholders $placeholders, Common::Rename $rename --> List) {
 		my $alias      = self.render-identifier($rename.alias.name);
-		my @columns    = self.render-identifiers($rename.alias.columns, :parenthesize);
+		my @columns    = self.render-identifiers($rename.alias.columns);
 		my $expression = self.render-expression($placeholders, $rename.keyword, Precedence::Comma);
 		$alias, 'AS', $expression;
 	}
@@ -1595,12 +1605,12 @@ class Renderer::SQL does Renderer {
 		'SET', self.render-expression-list($placeholders, @expressions, False);
 	}
 	multi method render-update-values(Placeholders $placeholders, Updater::Row $update) {
-		my $columns = self.render-identifiers($update.columns, :parenthesize);
+		my $columns = self.render-identifiers($update.columns);
 		my $expression = self.render-expression($placeholders, $update.row, Precedence::Rowlike);
 		"SET $columns = $expression";
 	}
 	multi method render-update-values(Placeholders $placeholders, Updater::Select $update) {
-		my $columns = self.render-identifiers($update.columns, :parenthesize);
+		my $columns = self.render-identifiers($update.columns);
 		my $select  = self.render-expression($placeholders, $update.select, Precedence::Assignment);
 		"SET $columns = $select";
 	}
@@ -1623,13 +1633,13 @@ class Renderer::SQL does Renderer {
 		Empty;
 	}
 
-	method render-rows(Placeholders $placeholders, Rows $rows) {
+	method render-values(Placeholders $placeholders, Rows $rows) {
 		my @values = $rows.elems.map({ self.render-expression-list($placeholders, $^row.elements, True) });
 		'VALUES', @values.join(', ');
 	}
 
 	multi method render-insert-content(Placeholders $placeholders, Insert::Values $insert) {
-		self.render-rows($placeholders, $insert.rows);
+		self.render-values($placeholders, $insert.rows);
 	}
 	multi method render-insert-content(Placeholders $placeholders, Insert::Select $insert) {
 		self.render-expression($placeholders, $insert.select, Precedence::Rowlike);
@@ -1639,7 +1649,7 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Columns:D $target) {
-		my $columns = self.render-identifiers($target.columns, :parenthesize);
+		my $columns = self.render-identifiers($target.columns);
 		my $where = self.render-conditions($placeholders, $target.where);
 		$columns, |@$where;
 	}
@@ -1671,7 +1681,7 @@ class Renderer::SQL does Renderer {
 	multi method render-expression(Placeholders $placeholders, Insert $insert, Precedence --> Str) {
 		my @common     = self.render-common-tables($placeholders, $insert.common-tables);
 		my @target     = self.render-table($insert.target);
-		my @fields     = self.render-identifiers($insert.fields, :parenthesize);
+		my @fields     = self.render-identifiers($insert.fields);
 		my @overriding = self.render-overriding($insert.overriding);
 		my @content    = self.render-insert-content($placeholders, $insert);
 		my @conflict   = self.render-conflict($placeholders, $insert.conflict);
@@ -1691,11 +1701,15 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-expression(Placeholders $placeholders, Values $values, Precedence --> Str) {
-		my @rows     = $values.render-rows($placeholders, $values.rows);
+		my @rows     = $values.render-values($placeholders, $values.rows);
 		my @order-by = self.render-order-by($placeholders, $values.order-by);
 		my @limits   = self.render-limit-offset($placeholders, $values.limit, $values.offset);
 
 		(@rows, @order-by, @limits).flat.join(' ');
+	}
+
+	multi method render-expression(Placeholders $placeholders, Table $table, Precedence --> Str) {
+		"TABLE { self.render-table($table) }";
 	}
 
 	method render(Expression $expression, :$result-class = $!result-class) {
@@ -1712,43 +1726,50 @@ multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 
+#proto method select(|) { * }
+#multi method select(Source:D(Any:D) $source, :$result-class!, |arguments) {
+#	my $select = $source.select(|arguments);
+#	$!renderer.render($select, :$result-class);
+#}
 method select(Source:D(Any:D) $source, |arguments) {
 	my $select = $source.select(|arguments);
 	$!renderer.render($select);
 }
 
-method insert(Table:D(Any:D) $target, |arguments) {
+multi method insert(Table:D(Any:D) $target, :$result-class!, |arguments) {
+	my $insert = $target.insert(|arguments);
+	$!renderer.render($insert, :$result-class);
+}
+multi method insert(Table:D(Any:D) $target, |arguments) {
 	my $insert = $target.insert(|arguments);
 	$!renderer.render($insert);
 }
 
-method update(Table:D(Any:D) $target, |arguments) {
+multi method update(Table:D(Any:D) $target, :$result-class!, |arguments) {
+	my $update = $target.update(|arguments);
+	$!renderer.render($update, :$result-class);
+}
+multi method update(Table:D(Any:D) $target, |arguments) {
 	my $update = $target.update(|arguments);
 	$!renderer.render($update);
 }
 
-method delete(Table:D(Any:D) $target, |arguments) {
+multi method delete(Table:D(Any:D) $target, :$result-class!, |arguments) {
+	my $delete = $target.delete(|arguments);
+	$!renderer.render($delete, :$result-class);
+}
+multi method delete(Table:D(Any:D) $target, |arguments) {
 	my $delete = $target.delete(|arguments);
 	$!renderer.render($delete);
 }
 
-method values(Rows:D $rows, OrderBy :$order-by, Limit :$limit, Offset :$offset) {
+multi method values(Rows:D $rows, OrderBy :$order-by, Limit :$limit, Offset :$offset, :$result-class) {
+	my $values = Values.new(:$rows, :$order-by, :$limit, :$offset);
+	$!renderer.render($values, :$result-class);
+}
+multi method values(Rows:D $rows, OrderBy :$order-by, Limit :$limit, Offset :$offset) {
 	my $values = Values.new(:$rows, :$order-by, :$limit, :$offset);
 	$!renderer.render($values);
-}
-
-multi method table(Table:D(Any:D) $table) {
-	$table;
-}
-multi method table(Table:D(Any:D) $table, Identifier:D(Cool:D) :$as!) {
-	$table.as($as);
-}
-multi method table(Table:D(Any:D) $table, Pair :$as!) {
-	$table.as($as.key, $as.value);
-}
-
-method value(Placeholder(Any) $value) {
-	$value;
 }
 
 method begin() {
@@ -1761,6 +1782,52 @@ method rollback() {
 
 method commit() {
 	'COMMIT', [];
+}
+
+
+multi method table(Table:D(Any:D) $table) {
+	$table;
+}
+multi method table(Table:D(Any:D) $table, Identifier:D(Cool:D) :$as!) {
+	$table.as($as);
+}
+multi method table(Table:D(Any:D) $table, Pair :$as!) {
+	$table.as($as.key, $as.value);
+}
+
+method ident(Identifier(Cool) $ident) {
+	$ident;
+}
+
+method function(Str $name, Expression::List:D(Any:D) $arguments = ()) {
+	Function.new($name, $arguments);
+}
+
+method value(Placeholder(Any) $value) {
+	$value;
+}
+
+multi method conflict(Any:D :$do where 'nothing') {
+	Conflict.COERCE((Conflict::Target) => $do);
+}
+multi method conflict(Identifiers(Any) :$columns!, Any:D :$do) {
+	Conflict.COERCE(:$columns => $do);
+}
+multi method conflict(Identifier(Cool) :$constraint!, Any:D :$do) {
+	Conflict.COERCE(:$constraint => $do);
+}
+
+method null() {
+	Value::Null.new;
+}
+method default() {
+	Value::Default.new;
+}
+method true() {
+	Value::True.new;
+}
+method false() {
+	Value::False.new;
 }
 
 =begin pod
@@ -1787,13 +1854,17 @@ my ($sql, $arguments) = $abstract.select($join, [<book name>, <author name>], { 
 
 =head1 Description
 
-SQL::Abstract abstracts the generation of SQL queries. Fundamentally its functionality is 
+SQL::Abstract abstracts the generation of SQL queries. Fundamentally its functionality has three components
+
+=item1 An AST to represent SQL queries
+=item1 A set of helpers to convert standard raku datatypes
+=item1 A renderer to turn that AST into an SQL query
 
 It should 
 
-=head1 Argument types
+=head1 Helper types
 
-SQL::Abstract uses
+SQL::Abstract uses 
 
 =head2 SQL::Abstract::Source
 
@@ -1821,7 +1892,7 @@ It also has a C<select> method that works like C<SQL::Abstract>'s select
 
 This class 
 
-=head2 Identifiers
+=head2 SQL::Abstract::Identifier
 
 =begin item2
 Str
@@ -1832,7 +1903,7 @@ This will fetch the given column
 =begin item2
 List
 
-This will fetch the given columns. The values can be anything in this 
+This will fetch the given columns, with the elements of the list representing the components of the column name. E.g. C<< <bar baz> >> is equivalent to C< "bar.baz" >.
 =end item2
 
 =begin item2
@@ -1848,21 +1919,28 @@ This will fetch the given column, and if the value of the pair is not a boolean 
 
 =end item2
 
-=begin item2
-Hash
 
-This will function as a list of pairs, fetch all keys as columns and rename them to their value if applicable.
-=end item2
 
-=head2 Expression::List
+=head2 SQL::Abstract::Identifiers
 
-This works as a 
+This takes either a list of C<Identifier()>, or a single C<Identifier()>.
 
-=head2 Conditions
+=head2 SQL::Abstract::Expression::List
+
+This 
+
+=head2 SQL::Abstract::Conditions
+
+=head2 SQL::Abstract::Assigns
+
+=head2 SQL::Abstract::OrderBy
+
+This takes a list (or an element) of identifiers or pairs. Each pair is 
+This sorts the rows by the listed columns. This is interpreted the same as C<$columns>, except C<*> isn't allowed, simple numbers may be interpreted as column numbers by your database, and it also allows one to use C<SQL::Abstract::Order::Modifier::Asc>/C<SQL::Abstract::Order::Desc> to specify the sorting order.
 
 =head1 Class SQL::Abstract
 
-=head2 new(:$placeholders!)
+=head3 new(:$placeholders!)
 
 This creates a new C<SQL::Abstract> object. It has one mandatory name argument, C<$placeholders>, which takes one of the following values:
 
@@ -1878,19 +1956,17 @@ SQL::Abstract::Placeholders::Postgres
 This will use Postgres style C<($1, $2)> for placeholders.
 =end item1
 
-=head2 select(Source() $source, Expression::List() $columns?, Conditions() $where?, Bool :$distinct, Expression::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$locking)
+=head3 select(Source() $source, Expression::List() $columns?, Conditions() $where?, Bool :$distinct, Expression::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$locking)
 
 This will generate a C<SELECT> query.
 
 =begin item1
-SQL::Abstract::Source(Any:D) $source
-
-The source of the selection. If it's not already a C<Source> object (e.g. a C<Table> or C<Join> object) it will convert from the following types:
+Source(Any:D) $source
 
 =end item1
 
 =begin item1
-SQL::Abstract::Expression::List(Any:D) $columns = *
+Expression::List(Any:D) $columns = *
 
 This will contain the requested columns. It 
 
@@ -1910,7 +1986,7 @@ Bool :$distinct
 =end item1
 
 =begin item1
-SQL::Abstract::Expression::List(Any) :$group-by,
+Expression::List(Any) :$group-by,
 
 Group by the listed columns. They're interpreted the same as C<$columns> is interpreted.
 =end item1
@@ -1924,7 +2000,6 @@ This will be the C<HAVING> conditions. it works described below in the Condition
 =begin item1
 OrderBy(Any) :$order-by,
 
-This sorts the rows by the listed columns. This is interpreted the same as C<$columns>, except C<*> isn't allowed, simple numbers may be interpreted as column numbers by your database, and it also allows one to use C<SQL::Abstract::Order::Modifier::Asc>/C<SQL::Abstract::Order::Desc> to specify the sorting order.
 =end item1
 
 =begin item1
@@ -1940,45 +2015,22 @@ Sets an offset for the returned values. This only makes sense if C<$limit> is al
 =end item1
 
 =begin item1
-SQL::Abstract::Locking(Any) :$locking
+Locking(Any) :$locking
 
 This sets the locking clause of the query. Reasonably portable values for this include:
 
-=item2 C<'update'>/C<SQL::Abstract::Locking::Update>
-=item2 C<'share'>/C<SQL::Abstract::Locking::Share>
+=item2 C<'update'>/C<SQL::Abstract::Locking::Strength::Update>
+=item2 C<'share'>/C<SQL::Abstract::Locking::Strength::Share>
 
 =end item1
 
-=head2 update(Table(Cool) $target, Assigns(Cool) $set, Conditions(Any) $where?, Expression::List(Any) :$returning) {
+=head3 update(Table(Cool) $target, Assigns(Cool) $set, Conditions(Any) $where?, Expression::List(Any) :$returning) {
 
-=begin item1
-Table(Cool) $target
+=head3 insert(Table(Cool) $target, Expression::List(Any) $fields, Rows(Any) $rows, Expression::List(Any) :$returning)
 
-This works
-=end item1
+=head3 insert(Table(Cool) $target, Assigns(Hash) $values, Expression::List(Any) :$returning) {
 
-=begin item1
-Assigns(Cool) $set
-
-=end item1
-
-=begin item1
-Conditions(Any) $where?, 
-
-=end item1
-
-=begin item1
-Expression::List(Any) :$returning
-
-=end item1
-
-=head2 insert(Table(Cool) $target, Expression::List(Any) $fields, Rows(Any) $rows, Expression::List(Any) :$returning)
-
-=head2 insert(Table(Cool) $target, Assigns(Hash) $values, Expression::List(Any) :$returning) {
-
-=head2 delete(Table(Cool) $target, Conditions(Any) $where?, Expression::List(Any) :$returning) {
-
-=head1 Conditions
+=head3 delete(Table(Cool) $target, Conditions(Any) $where?, Expression::List(Any) :$returning) {
 
 =head1 Author
 

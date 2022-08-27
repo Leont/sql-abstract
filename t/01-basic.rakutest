@@ -53,8 +53,9 @@ is-deeply $select-rename2, SQL::Abstract::Result.new('SELECT bar, baz FROM quz A
 
 
 my $select-subselect1-select = $abstract.table('other_table').select(*, { :bar{ '>' => 3 } });
-my $select-subselect1 =  $abstract.select($select-subselect1-select.as('new name'), <bar baz>, { :foo('<' => 4) });
-is-deeply $select-subselect1, SQL::Abstract::Result.new('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new name WHERE foo < $2', [3, 4]);
+my $select-subselect1 =  $abstract.select($select-subselect1-select.as(<new name>), <bar baz>, { :foo('<' => 4) });
+is-deeply $select-subselect1, SQL::Abstract::Result.new('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new.name WHERE foo < $2', [3, 4]);
+
 
 my $select-named1 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by<bar>);
 is-deeply $select-named1, SQL::Abstract::Result.new('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar', [1]);
@@ -74,21 +75,25 @@ is-deeply $select-named5, SQL::Abstract::Result.new('SELECT DISTINCT ON (bar) ba
 my $select-named6 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by(:bar<desc>));
 is-deeply $select-named6, SQL::Abstract::Result.new('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar DESC', [1]);
 
-my $select-window1 = $abstract.select('my_table', ( bar => SQL::Abstract::Function::Window.new('rank')));
+
+my $rank = $abstract.function('rank');
+my $select-window1 = $abstract.select('my_table', ( bar => $rank.over));
 is-deeply $select-window1, SQL::Abstract::Result.new('SELECT rank() OVER () AS bar FROM my_table', []);
 
-my $select-window2 = $abstract.select('my_table', ( bar => SQL::Abstract::Function::Window.new('rank', :columns<baz quz>)));
+my $select-window2 = $abstract.select('my_table', ( bar => $rank.over(:partition-by<baz quz>)));
 is-deeply $select-window2, SQL::Abstract::Result.new('SELECT rank() OVER (PARTITION BY baz, quz) AS bar FROM my_table', []);
 
-my $select-window3 = $abstract.select('my_table', ( bar => SQL::Abstract::Function::Window.new('rank', :order-by<quz>)));
+my $select-window3 = $abstract.select('my_table', ( bar => $rank.over(:order-by<quz>)));
 is-deeply $select-window3, SQL::Abstract::Result.new('SELECT rank() OVER (ORDER BY quz) AS bar FROM my_table', []);
 
-my $select-window4 = $abstract.select('my_table', ( bar => SQL::Abstract::Function::Window.new('rank', :columns<baz quz>, :order-by<quz>)));
+my $select-window4 = $abstract.select('my_table', ( bar => $rank.over(:partition-by<baz quz>, :order-by<quz>)));
 is-deeply $select-window4, SQL::Abstract::Result.new('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz) AS bar FROM my_table', []);
 
+
 my $when1 = SQL::Abstract::Op::Case::When.new(SQL::Abstract::Placeholder.new("no"), SQL::Abstract::Placeholder.new(42));
-my $select-case1 = $abstract.select('my_table', SQL::Abstract::Op::Case.new(SQL::Abstract::Identifier.new('bar'), [$when1]), { :1foo });
-is-deeply $select-case1, SQL::Abstract::Result.new('SELECT CASE bar WHEN $1 THEN $2 END FROM my_table WHERE foo = $3', ['no', 42, 1]);
+my $select-case1 = $abstract.select('my_table', SQL::Abstract::Op::Case.new(SQL::Abstract::Identifier.new('bar'), [$when1], SQL::Abstract::Placeholder.new(13)), { :1foo });
+is-deeply $select-case1, SQL::Abstract::Result.new('SELECT CASE bar WHEN $1 THEN $2 ELSE $3 END FROM my_table WHERE foo = $4', ['no', 42, 13, 1]);
+
 
 my $select-junction1 = $abstract.select('my_table', <bar baz>, { :foo(1|2|4) });
 is-deeply $select-junction1, SQL::Abstract::Result.new('SELECT bar, baz FROM my_table WHERE foo IN ($1, $2, $3)', [1, 2, 4]);
@@ -130,8 +135,8 @@ my $select-precedence1 = $abstract.select('my_table', <bar baz>, $e);
 is-deeply $select-precedence1, SQL::Abstract::Result.new('SELECT bar, baz FROM my_table WHERE $1 < ($2 AND $3)', [1, 1, 2]);
 
 
-#my $select-cte1 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => 'other_table' ]);
-#is-deeply $select-cte1, ('WITH my_table AS other_table SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
+my $select-cte1 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => $abstract.table('other_table') ]);
+is-deeply $select-cte1, SQL::Abstract::Result.new('WITH my_table AS (TABLE other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
 
 my $select-cte2-other = $abstract.table('other_table').select;
 my $select-cte2 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => $select-cte2-other ]);
@@ -150,7 +155,7 @@ my $join1 = $table1.join((:quz<other_table>), :using<qaz>);
 my $select-join1 = $abstract.select($join1, <bar baz>, { :1foo });
 is-deeply $select-join1, SQL::Abstract::Result.new('SELECT bar, baz FROM my_table INNER JOIN other_table AS quz USING (qaz) WHERE foo = $1', [1]);
 
-my $join2 = SQL::Abstract::Join::On.new('my_table', 'other_table', {'my_table.baz' => <other_table baz_id>});
+my $join2 = $table1.join('other_table', :on{'my_table.baz' => <other_table baz_id>});
 my $select-join2 = $abstract.select($join2, <bar baz>, { :1foo});
 is-deeply $select-join2, SQL::Abstract::Result.new('SELECT bar, baz FROM my_table INNER JOIN other_table ON my_table.baz = other_table.baz_id WHERE foo = $1', [1]);
 
@@ -170,10 +175,11 @@ is-deeply $insert3, SQL::Abstract::Result.new('INSERT INTO my_table (bar, baz) V
 my $insert4 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :returning<bar baz>);
 is-deeply $insert4, SQL::Abstract::Result.new('INSERT INTO my_table (bar, baz) VALUES ($1, $2) RETURNING bar, baz', [1, 42]);
 
-my $insert5 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict(SQL::Abstract::Conflict::Update::Pairwise.new(<bar>, { bar => 2 })));
+my $conflict5 = $abstract.conflict(:columns<bar>, :do{ bar => 2 });
+my $insert5 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict($conflict5));
 is-deeply $insert5, SQL::Abstract::Result.new('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT (bar) DO UPDATE SET bar = $3', [1, 42, 2]);
 
-my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict<nothing>);
+my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict($abstract.conflict(:do<nothing>)));
 is-deeply $insert6, SQL::Abstract::Result.new('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT DO NOTHING', [1, 42]);
 
 my $insert7-select = $abstract.table('other_table').select(<bar baz>, { :foo('>' => 3) });
