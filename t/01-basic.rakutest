@@ -54,6 +54,10 @@ my $select-rename3 = $abstract.select((:my_table<quz>), <bar baz>, { :foo(Any) }
 is-deeply $select-rename3, ('SELECT bar, baz FROM quz AS my_table WHERE foo IS NULL', []);
 
 
+my $select-subselect1-select = $abstract.table('other_table').select(*, { :bar{ '>' => 3 } });
+my $select-subselect1 =  $abstract.select($select-subselect1-select.as('new name'), <bar baz>, { :foo('<' => 4) });
+is-deeply $select-subselect1, ('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new name WHERE foo < $2', [3, 4]);
+
 my $select-named1 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by<bar>);
 is-deeply $select-named1, ('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar', [1]);
 
@@ -72,7 +76,6 @@ is-deeply $select-named5, ('SELECT DISTINCT ON (bar) bar, baz FROM my_table WHER
 my $select-named6 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by(:bar<desc>));
 is-deeply $select-named6, ('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar DESC', [1]);
 
-
 my $select-window1 = $abstract.select('my_table', { bar => SQL::Abstract::Column::Window.new('rank')});
 is-deeply $select-window1, ('SELECT rank() OVER () AS bar FROM my_table', []);
 
@@ -85,6 +88,11 @@ is-deeply $select-window3, ('SELECT rank() OVER (ORDER BY quz) AS bar FROM my_ta
 my $select-window4 = $abstract.select('my_table', { bar => SQL::Abstract::Column::Window.new('rank', :columns<baz quz>, :order-by<quz>)});
 is-deeply $select-window4, ('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz) AS bar FROM my_table', []);
 
+constant Case = SQL::Abstract::Op::Case;
+constant Placeholder = SQL::Abstract::Placeholder;
+my $when1 = Case::When.new(Placeholder.new("no"), Placeholder.new(42));
+my $select-case1 = $abstract.select('my_table', SQL::Abstract::Op::Case.new(SQL::Abstract::Column::Name.new('bar'), [$when1]), { :1foo });
+is-deeply $select-case1, ('SELECT CASE bar WHEN $1 THEN $2 END FROM my_table WHERE foo = $3', ['no', 42, 1]);
 
 my $select-junction1 = $abstract.select('my_table', <bar baz>, { :foo(1|2|4) });
 is-deeply $select-junction1, ('SELECT bar, baz FROM my_table WHERE foo IN ($1, $2, $3)', [1, 2, 4]);
@@ -102,7 +110,7 @@ my $select-junction5 = $abstract.select('my_table', <bar baz>, { :foo(any('=' =>
 is-deeply $select-junction5, ('SELECT bar, baz FROM my_table WHERE foo = $1 OR foo > $2', [1, 4]);
 
 my $select-junction6 = $abstract.select('my_table', <bar baz>, { :foo(none('<' => 1, '>' => 2)) });
-is-deeply $select-junction6, ('SELECT bar, baz FROM my_table WHERE foo >= $1 AND foo <= $2', [1, 2]);
+is-deeply $select-junction6, ('SELECT bar, baz FROM my_table WHERE NOT (foo < $1 OR foo > $2)', [1, 2]);
 
 my $select-junction7 = $abstract.select('my_table', <bar baz>, { :foo(none(1..42, Empty)) });
 is-deeply $select-junction7, ('SELECT bar, baz FROM my_table WHERE foo NOT BETWEEN $1 AND $2', [1, 42]);
@@ -121,7 +129,7 @@ is-deeply $select-locking1, ('SELECT bar, baz FROM my_table WHERE foo = $1 FOR U
 my $select-locking2 = $abstract.select('my_table', <bar baz>, { :1foo }, :locking(:update<foo>));
 is-deeply $select-locking2, ('SELECT bar, baz FROM my_table WHERE foo = $1 FOR UPDATE OF foo', [1]);
 
-my $e = SQL::Abstract::Op::LessThan.new(SQL::Abstract::Placeholder.new(1), SQL::Abstract::Op::And.new([SQL::Abstract::Placeholder.new(1), SQL::Abstract::Placeholder.new(2)]));
+my $e = SQL::Abstract::Op::LessThan.new(Placeholder.new(1), SQL::Abstract::Op::And.new([Placeholder.new(1), Placeholder.new(2)]));
 my $select-precedence1 = $abstract.select('my_table', <bar baz>, $e);
 is-deeply $select-precedence1, ('SELECT bar, baz FROM my_table WHERE $1 < ($2 AND $3)', [1, 1, 2]);
 
@@ -142,7 +150,7 @@ my $select-union2 = $abstract.select('my_table', <bar baz>, { :1foo }, :compound
 is-deeply $select-union2, ('SELECT bar, baz FROM my_table WHERE foo = $1 UNION ALL SELECT * FROM other_table ORDER BY bar', [1]);
 
 my $table1 = $abstract.table('my_table');
-my $join1 = $table1.join('other_table', :as<quz>, :using<qaz>);
+my $join1 = $table1.join((:quz<other_table>), :using<qaz>);
 my $select-join1 = $abstract.select($join1, <bar baz>, { :1foo });
 is-deeply $select-join1, ('SELECT bar, baz FROM my_table INNER JOIN other_table AS quz USING (qaz) WHERE foo = $1', [1]);
 
@@ -150,7 +158,7 @@ my $join2 = SQL::Abstract::Join::On.new('my_table', 'other_table', {'my_table.ba
 my $select-join2 = $abstract.select($join2, <bar baz>, { :1foo});
 is-deeply $select-join2, ('SELECT bar, baz FROM my_table INNER JOIN other_table ON my_table.baz = other_table.baz_id WHERE foo = $1', [1]);
 
-my $select-in-sub1-any = SQL::Abstract::Op::In.new(SQL::Abstract::Column::Named.new('foo'), [ $abstract.table('other_table').select ]);
+my $select-in-sub1-any = SQL::Abstract::Op::In.new(SQL::Abstract::Column::Name.new('foo'), [ $abstract.table('other_table').select ]);
 my $select-in-sub1 = $abstract.select('my_table', <bar baz>, $select-in-sub1-any);
 is-deeply $select-in-sub1, ('SELECT bar, baz FROM my_table WHERE foo IN (SELECT * FROM other_table)', []);
 
@@ -166,7 +174,7 @@ is-deeply $insert3, ('INSERT INTO my_table (bar, baz) VALUES ($1, $2), ($3, $4)'
 my $insert4 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :returning<bar baz>);
 is-deeply $insert4, ('INSERT INTO my_table (bar, baz) VALUES ($1, $2) RETURNING bar, baz', [1, 42]);
 
-my $insert5 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict(SQL::Abstract::Conflict::Update.new(<bar>, { bar => 2 })));
+my $insert5 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict(SQL::Abstract::Conflict::Update::Pairwise.new(<bar>, { bar => 2 })));
 is-deeply $insert5, ('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT (bar) DO UPDATE SET bar = $3', [1, 42, 2]);
 
 my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict<nothing>);
@@ -176,11 +184,15 @@ my $insert7-select = $abstract.table('other_table').select(<bar baz>, { :foo('>'
 my $insert7 =  $abstract.insert('my_table', <bar baz>, $insert7-select);
 is-deeply $insert7, ('INSERT INTO my_table (bar, baz) SELECT bar, baz FROM other_table WHERE foo > $1', [3]);
 
-my $insert8 = $abstract.insert('my_table', { bar => 1, baz => 43 }, :as<alias>);
+my $insert8 = $abstract.insert((:alias<my_table>), { bar => 1, baz => 43 });
 is-deeply $insert8, ('INSERT INTO my_table AS alias (bar, baz) VALUES ($1, $2)', [1, 43]);
 
 my $insert9 = $abstract.insert('my_table', SQL::Abstract::Value::Default);
 is-deeply $insert9, ('INSERT INTO my_table DEFAULT VALUES', []);
+
+my $insert10 = $abstract.insert('my_table', { bar => 1, baz => 43 }, :overriding(SQL::Abstract::Overriding::System));
+is-deeply $insert10, ('INSERT INTO my_table (bar, baz) OVERRIDING SYSTEM VALUE VALUES ($1, $2)', [1, 43]);
+
 
 my $update1 = $abstract.update('my_table', { bar => 1, baz => 42 });
 is-deeply $update1, ('UPDATE my_table SET bar = $1, baz = $2', [1, 42]);
@@ -204,12 +216,22 @@ my $update7-select = $abstract.table('other_table').select(*, { :bar{ '>' => 3 }
 my $update7 = $abstract.update('my_table', <bar baz>, $update7-select, { quz => 13 });
 is-deeply $update7, ('UPDATE my_table SET (bar, baz) = (SELECT * FROM other_table WHERE bar > $1) WHERE quz = $2', [3, 13]);
 
+my $update8 = $abstract.update('my_table', <bar baz>, SQL::Abstract::Row.COERCE([1, 2]), { quz => 13 });
+is-deeply $update8, ('UPDATE my_table SET (bar, baz) = ROW($1, $2) WHERE quz = $3', [1, 2, 13]);
+
+my $update9 = $abstract.update('my_table', { bar => 1, baz => 42 }, :from<quz>);
+is-deeply $update9, ('UPDATE my_table SET bar = $1, baz = $2 FROM quz', [1, 42]);
+
+
 
 my $delete1 = $abstract.delete('my_table', { :foo('<' => 3) });
 is-deeply $delete1, ('DELETE FROM my_table WHERE foo < $1', [3]);
 
 my $delete2 = $abstract.delete('my_table', { :foo('<' => 3) }, :returning<baz>);
 is-deeply $delete2, ('DELETE FROM my_table WHERE foo < $1 RETURNING baz', [3]);
+
+my $delete3 = $abstract.delete('my_table', { :foo('<' => 3) }, :using<baz>);
+is-deeply $delete3, ('DELETE FROM my_table USING baz WHERE foo < $1', [3]);
 
 
 
@@ -230,8 +252,8 @@ is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
 
 my SQL::Abstract::Conditions(Any) $conditional1 = :1id;
 isa-ok $conditional1.expression, Op::Equals;
-is $conditional1.expression.left, SQL::Abstract::Column::Named.new('id');
-cmp-ok $conditional1.expression.left, '===', SQL::Abstract::Column::Named.new('id');
+is $conditional1.expression.left, SQL::Abstract::Column::Name.new('id');
+cmp-ok $conditional1.expression.left, '===', SQL::Abstract::Column::Name.new('id');
 is-deeply $conditional1.expression.right, SQL::Abstract::Placeholder.new(1);
 
 my SQL::Abstract::Conditions(Any) $conditional2 = { :other(1|2) };
