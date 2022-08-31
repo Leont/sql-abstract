@@ -2,15 +2,15 @@ unit class SQL::Abstract;
 
 use fatal;
 
-enum Precedence <Rowlike Comma Assignment And Or Not Between In LoosePrefix Postfix Comparative Additive Multiplicative Concatlike TightPrefix Termlike>;
+enum Precedence <Rowlike Comma Assignment And Or Not Between In Postfix Comparative Bitwise Additive Multiplicative Concatlike Prefix Termlike>;
 
-class Op::Unary::Not { ... }
+class Op::Not { ... }
 
 role Expression {
 	method precedence(--> Precedence) { ... }
 
 	method negate(--> Expression) {
-		Op::Unary::Not.new(self);
+		Op::Not.new(self);
 	}
 }
 
@@ -19,12 +19,12 @@ role Term does Expression {
 }
 
 class Literal does Expression {
-	has Precedence $.precedence = Precedence::Termlike;
+	has Precedence $.precedence;
 	has Str:D $.payload is required;
 	has Any:D @.arguments;
 
-	method new(Str:D $payload, @arguments?) {
-		self.bless(:$payload, :@arguments);
+	method new(Str:D $payload, @arguments?, :$precedence = Precedence::Termlike) {
+		self.bless(:$payload, :@arguments, :$precedence);
 	}
 }
 
@@ -52,13 +52,6 @@ role Constant[Str $keyword] does Term {
 	}
 }
 
-class Parentheses does Term {
-	has Expression $.inner;
-	method new(Expression $inner) {
-		self.bless(:$inner);
-	}
-}
-
 class Value::Default does Constant['DEFAULT'] {}
 class Value::True    does Constant['TRUE']    {}
 class Value::False   does Constant['FALSE']   {}
@@ -71,8 +64,8 @@ my multi expand-expression(Any $value) {
 	Placeholder.new($value);
 }
 my multi expand-expression(Capture $literal) {
-	my ($sql, @arguments) = |$literal;
-	Literal.new($sql, @arguments);
+	my ($sql, @arguments, *%args) = |$literal;
+	Literal.new($sql, @arguments, |%args);
 }
 
 class Identifier does Term {
@@ -87,7 +80,7 @@ class Identifier does Term {
 		self.bless(:@parts);
 	}
 
-	method concat(::?CLASS $other) {
+	method concat(Identifier $other) {
 		self.new([|@!parts, |$other.parts]);
 	}
 
@@ -130,13 +123,13 @@ multi expand-expression(Whatever) {
 }
 
 class Identifiers {
-	has Identifier:D @.elems is required;
+	has Identifier:D @.elements is required;
 
-	method new(@elems) {
-		self.bless(:@elems);
+	method new(@elements) {
+		self.bless(:@elements);
 	}
 
-	multi method COERCE(Identifier(Any) $column) {
+	multi method COERCE(Identifier(Cool) $column) {
 		self.new([$column]);
 	}
 	multi method COERCE(@list) {
@@ -145,15 +138,17 @@ class Identifiers {
 	}
 
 	multi method merge(Identifiers $other) {
-		self.new(|@!elems, |$other.elems);
+		self.new(|@!elements, |$other.elements);
 	}
 }
 
-class Expression::List {
-	has Expression:D @.elems is required;
+class Expression::List does Expression {
+	method precedence(--> Precedence::Rowlike) {}
 
-	method new(@elems) {
-		self.bless(:@elems);
+	has Expression:D @.elements is required;
+
+	method new(@elements) {
+		self.bless(:@elements);
 	}
 
 	my multi to-column(Expression $column) {
@@ -180,11 +175,11 @@ class Expression::List {
 		self.new(@columns);
 	}
 	multi method COERCE(Identifiers $columns) {
-		self.new($columns.elems);
+		self.new($columns.elements);
 	}
 
 	multi method merge(Expression::List $other) {
-		self.new(|@!elems, |$other.elems);
+		self.new(|@!elements, |$other.elements);
 	}
 }
 
@@ -196,67 +191,53 @@ role Op::Unary does Expression {
 	}
 }
 
-role Op::Unary::Postfix[Str $operator] does Op::Unary {
+role Op::Postfix does Op::Unary {
 	method precedence(--> Precedence::Postfix) {}
 
-	method postfix(--> Str) { $operator }
+	method postfix(--> Str) { ... }
 
 	method new(Expression $value) {
 		self.bless(:$value);
 	}
 }
 
-class Op::IsNotNull does Op::Unary::Postfix['IS NOT NULL'] {
-}
-class Op::IsNull does Op::Unary::Postfix['IS NULL'] {
+class Op::IsNull does Op::Postfix {
+	has Bool $.negated;
+	method postfix() {
+		$!negated ?? 'IS NOT NULL' !! 'IS NULL';
+	}
 	method negate {
-		Op::IsNotNull.new($!value);
+		Op::IsNull.new($!value, :negated(!$!negated));
 	}
 }
 
-role Op::Unary::Prefix::Loose does Op::Unary {
-	method precedence(--> Precedence::LoosePrefix) {}
-	method operator(--> Str:D) { ... }
+role Op::Prefix[Str $operator] does Op::Unary {
+	method precedence(--> Precedence::Prefix) {}
+	method operator(--> Str:D) { $operator }
 }
 
-role Op::Unary::Prefix::Tight does Op::Unary {
-	method precedence(--> Precedence::TightPrefix) {}
-	method operator(--> Str:D) { ... }
-}
+class Op::Positive does Op::Prefix['+'] {}
+class Op::Negative does Op::Prefix['-'] {}
+class Op::Complement does Op::Prefix['~'] {}
 
-class Op::Unary::Not does Op::Unary::Prefix::Loose {
+class Op::Not does Op::Unary {
 	method precedence(--> Precedence::Not) {}
-	method operator(--> 'NOT') {}
 
-	method new(Expression $value) {
-		self.bless(:$value);
-	}
-
-	method negated(--> Bool) {
+	method negate(--> Bool) {
 		$!value;
 	}
 }
 
 role Op::Binary does Expression {
 	method operator() { ... }
+
 	has Expression:D $.left is required;
 	has Expression:D $.right is required;
+
 	method new(Expression:D $left, Expression:D $right) {
 		self.bless(:$left, :$right);
 	}
 }
-
-role Op::Concatenative[Str $operator] does Op::Binary {
-	method precedence(--> Precedence::Concatlike) {}
-	method operator() { $operator }
-}
-
-class Op::Concat does Op::Concatenative['||'] {}
-
-class Op::JSON::GetElem does Op::Concatenative['->'] {}
-class Op::JSON::GetElemText does Op::Concatenative['->>'] {}
-class Op::JSON::GetPath does Op::Concatenative['#>'] {}
-class Op::JSON::GetPathText does Op::Concatenative['#>>'] {}
 
 role Op::Comperative[Str $operator] does Op::Binary {
 	method precedence(--> Precedence::Comparative) {}
@@ -276,19 +257,23 @@ class Op::GreaterOrEqual does Op::Comperative['>='] {}
 class Op::LessOrEqual does Op::Comperative['<='] {}
 class Op::GreaterThan does Op::Comperative['>'] {}
 
-class Op::Like does Op::Comperative['LIKE'] {}
-class Op::Unlike does Op::Comperative['NOT LIKE'] {}
+class Op::Distinct does Op::Comperative['IS DISTINCT FROM'] {}
+class Op::NotDistinct does Op::Comperative['IS NOT DISTINCT FROM'] {}
 
-my %binary-op-for =
-	'='        => Op::Equals,
-	'!='       => Op::Unequals,
-	'<>'       => Op::Unequals,
-	'<'        => Op::LessThan,
-	'<='       => Op::LessOrEqual,
-	'>'        => Op::GreaterThan,
-	'>='       => Op::GreaterOrEqual,
-	'like'     => Op::Like,
-	'not-like' => Op::Unlike;
+role Op::Liking[Bool $positive] does Expression {
+	method precedence(--> Precedence::Comparative) {}
+	method negated() { !$positive }
+
+	has Expression:D $.left is required;
+	has Expression:D $.right is required;
+	has Expression $.escape;
+
+	method new(Expression:D $left, Expression:D $right, Expression $escape?) {
+		self.bless(:$left, :$right, :$escape);
+	}
+}
+class Op::Like does Op::Liking[True] {}
+class Op::NotLike does Op::Liking[False] {}
 
 class Op::Assign does Op::Binary {
 	method precedence(--> Precedence::Assignment) {}
@@ -296,18 +281,68 @@ class Op::Assign does Op::Binary {
 	method operator(--> '=') {}
 }
 
-role Op::Binary::Other[Precedence $precedence] does Op::Binary {
-	method precedence() { $precedence }
-
-	has Str:D $.operator is required;
-
-	method new(Str $operator, Expression $left, Expression $right) {
-		self.bless(:$operator, :$left, :$right);
-	}
+role Op::Concatenative[Str $operator] does Op::Binary {
+	method precedence(--> Precedence::Concatlike) {}
+	method operator() { $operator }
 }
 
-class Op::Binary::Additive does Op::Binary::Other[Precedence::Additive] { }
-class Op::Binary::Multiplicative does Op::Binary::Other[Precedence::Multiplicative] { }
+class Op::Concat does Op::Concatenative['||'] {}
+
+class Op::JSON::GetElem does Op::Concatenative['->'] {}
+class Op::JSON::GetElemText does Op::Concatenative['->>'] {}
+class Op::JSON::GetPath does Op::Concatenative['#>'] {}
+class Op::JSON::GetPathText does Op::Concatenative['#>>'] {}
+
+role Op::Additive[Str $operator] does Op::Binary {
+	method precedence(--> Precedence::Additive) {}
+	method operator() { $operator }
+}
+class Op::Plus does Op::Additive['+'] {}
+class Op::Minus does Op::Additive['-'] {}
+
+role Op::Multiplicative[Str $operator] does Op::Binary {
+	method precedence(--> Precedence::Multiplicative) {}
+	method operator() { $operator }
+}
+class Op::Times does Op::Multiplicative['*'] {}
+class Op::Divide does Op::Multiplicative['/'] {}
+class Op::Rest does Op::Multiplicative['%'] {}
+
+role Op::Bitwise[Str $operator] does Op::Binary {
+	method precedence(--> Precedence::Bitwise) {}
+	method operator() { $operator }
+}
+class Op::Bitwise::And does Op::Bitwise['&'] {}
+class Op::Bitwise::Or does Op::Bitwise['&'] {}
+class Op::Bitwise::Left does Op::Bitwise['<<'] {}
+class Op::Bitwise::Right does Op::Bitwise['>>'] {}
+
+my %binary-op-for =
+	'||'           => Op::Concat,
+	'->'           => Op::JSON::GetElem,
+	'->>'          => Op::JSON::GetElemText,
+	'#>'           => Op::JSON::GetPath,
+	'#>>'          => Op::JSON::GetPathText,
+	'*'            => Op::Times,
+	'/'            => Op::Divide,
+	'%'            => Op::Rest,
+	'+'            => Op::Plus,
+	'-'            => Op::Minus,
+	'&'            => Op::Bitwise::And,
+	'|'            => Op::Bitwise::Or,
+	'<<'           => Op::Bitwise::Left,
+	'>>'           => Op::Bitwise::Right,
+	'='            => Op::Equals,
+	'!='           => Op::Unequals,
+	'<>'           => Op::Unequals,
+	'<'            => Op::LessThan,
+	'<='           => Op::LessOrEqual,
+	'>'            => Op::GreaterThan,
+	'>='           => Op::GreaterOrEqual,
+	'like'         => Op::Like,
+	'not-like'     => Op::NotLike,
+	'distinct'     => Op::Distinct,
+	'not-distinct' => Op::NotDistinct;
 
 role Op::BetweenLike[Bool $positive] does Expression {
 	method precedence(--> Precedence::Between) {}
@@ -330,11 +365,9 @@ class Op::Between does Op::BetweenLike[True] {
 	}
 }
 
-role Op::List does Expression {
+role Op::Logical[Str $operator, Precedence $precedence, Constant $empty] does Expression {
 	has Expression @.elements is required;
-}
 
-role Op::Logical[Str $operator, Precedence $precedence, Constant $empty] does Op::List {
 	method precedence(--> Precedence) { $precedence }
 	method operator(--> Str) { $operator }
 
@@ -364,23 +397,56 @@ role Op::Logical[Str $operator, Precedence $precedence, Constant $empty] does Op
 	}
 }
 class Op::And does Op::Logical['AND', Precedence::And, Value::True] {}
-class Op::Or  does Op::Logical['OR', Precedence::Or, Value::False] {}
+class Op::Or  does Op::Logical['OR' , Precedence::Or, Value::False] {}
 
-role Op::ListCompare[Str $operator] does Op::List {
+role Op::In does Expression {
 	method precedence(--> Precedence::In) {}
-	method operator(--> Str) { $operator }
+	method expression() { ... }
 
 	has Expression:D $.left is required;
+	has Bool $.negated;
+}
 
-	method new(Expression $left, @elements) {
-		self.bless(:$left, :@elements);
+class Op::In::List does Op::In {
+	has Expression::List:D $.expression is required handles<elements>;
+
+	method new(Expression $left, @elements, Bool :$negated = False) {
+		my $expression = Expression::List.new(@elements);
+		self.bless(:$left, :$expression, :$negated);
+	}
+
+	method negate() {
+		self.bless(:$!left, :$!expression, :negated(!$!negated));
 	}
 }
 
-class Op::NotIn does Op::ListCompare['NOT IN'] { }
-class Op::In does Op::ListCompare['IN'] {
+role Query { ... }
+
+class Op::In::Query does Op::In {
+	has Query:D $.expression is required;
+
+	method new(Expression $left, Query $expression, Bool :$negated = False) {
+		self.bless(:$left, :$expression, :$negated);
+	}
+
 	method negate() {
-		Op::NotIn.new($!left, @!elements);
+		self.new($!left, $!expression, :negated(!$!negated));
+	}
+}
+
+class Op::Exists does Expression {
+	method precedence(--> Precedence::In) {}
+
+	has Expression:D $.left is required;
+	has Query:D $.query is required;
+	has Bool $.negated;
+
+	method new(Expression $left, Query $query, Bool :$negated = False) {
+		self.bless(:$left, :$query, :$negated);
+	}
+
+	method negate() {
+		self.new($!left, $!query, :negated(!$!negated));
 	}
 }
 
@@ -408,7 +474,7 @@ class Op::Case does Expression {
 	has When:D @.whens;
 	has Expression $.else;
 
-	method new(Expression $left, @whens, Expression $else?) {
+	method new(@whens, Expression $else?, Expression :$left) {
 		self.bless(:$left, :@whens, :$else);
 	}	
 }
@@ -449,7 +515,7 @@ class Conditions does Conditional {
 		Op::IsNull.new($left);
 	}
 	my multi expand-pair(Expression $left, 'isnotnull', $value) {
-		Op::IsNotNull.new($left);
+		Op::IsNull.new($left, :negated);
 	}
 	my multi expand-pair(Expression $left, Str $key, Any $value) {
 		my $expression = expand-expression($value);
@@ -467,8 +533,8 @@ class Conditions does Conditional {
 		%hash.sort(*.key).map: { expand-partial($left, $^pair) };
 	}
 	my multi expand-partial(Expression $left, Range $range) {
-		my $min = Placeholder.new($range.min);
-		my $max = Placeholder.new($range.max);
+		my $min = expand-expression($range.min);
+		my $max = expand-expression($range.max);
 		Op::Between.new($left, $min, $max);
 	}
 
@@ -476,7 +542,7 @@ class Conditions does Conditional {
 		Op::Or.pack(@partials);
 	}
 	my multi expand-junction(Expression $left, 'any', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
-		Op::In.new($left, @partials».right);
+		Op::In::List.new($left, @partials».right);
 	}
 	my multi expand-junction(Expression $left, 'all', @partials) {
 		Op::And.pack(@partials);
@@ -485,7 +551,7 @@ class Conditions does Conditional {
 		Op::Or.pack(@partials).negate;
 	}
 	my multi expand-junction(Expression $left, 'none', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
-		Op::NotIn.new($left, @partials».right);
+		Op::In::List.new($left, @partials».right, :negated);
 	}
 	my multi expand-junction(Expression $left, 'one', @partials) {
 		my @comparisons = @partials».resolve;
@@ -523,32 +589,33 @@ class Conditions does Conditional {
 class Order::Modifier does Expression {
 	method precedence(--> Precedence::Comma) {}
 
-	enum Sorting (:Asc<ASC> :Desc<DESC>);
+	enum Sorting (:Asc<asc> :Desc<desc>);
+	enum Nulls (:First<first>, :Last<last>);
 	has Expression:D $.column is required;
-	has Sorting:D $.order is required;
+	has Sorting $.order is required;
+	has Nulls $.nulls;
 
 	proto method new(|) { * }
-	multi method new(Expression $column, Sorting $order) {
-		self.bless(:$column, :$order);
-	}
-	multi method new(Expression $column, Str $order-name) {
-		my $order = Sorting.WHO{$order-name.lc.tc};
-		self.bless(:$column, :$order);
+	multi method new(Expression $column, Sorting $order?, Nulls $nulls?) {
+		self.bless(:$column, :$order, :$nulls);
 	}
 
-	multi method COERCE(Pair $ (Expression:D :$key, Any :$value)) {
+	multi method COERCE(Pair $ (Expression:D :$key, Sorting(Str) :$value)) {
 		self.new($key, $value);
 	}
-	multi method COERCE(Pair $ (Identifier:D(Cool:D) :$key, Any :$value)) {
+	multi method COERCE(Pair $ (Identifier:D(Cool:D) :$key, Sorting(Str) :$value)) {
 		self.new($key, $value);
+	}
+	multi method COERCE(Map $ (Identifier:D(Cool:D) :$column, Sorting(Str) :$order, Nulls(Str) :$nulls)) {
+		self.new($column, $order, $nulls)
 	}
 }
 
 class OrderBy {
-	has Expression:D @.elems is required;
+	has Expression:D @.elements is required;
 
-	method new(@elems) {
-		self.bless(:@elems);
+	method new(@elements) {
+		self.bless(:@elements);
 	}
 
 	my multi to-sorter(Expression:D $expression) {
@@ -586,11 +653,11 @@ class Row does Expression {
 }
 
 class Rows {
-	has Row @.elems;
+	has Row @.elements;
 
 	method COERCE(@input) {
-		my Row(Any) @elems = @input;
-		self.new(:@elems);
+		my Row(Any) @elements = @input;
+		self.new(:@elements);
 	}
 }
 
@@ -619,19 +686,32 @@ class Assigns {
 	}
 }
 
-class Window::Function { ... }
+enum Quantifier (:All<all> :Distinct<distinct>);
+
+package Window {
+	class Function { ... }
+	class Definition { ... }
+}
 class Source::Function { ... }
 
-class Function does Term {
+class Function does Expression {
 	has Str:D $.name is required;
+	has Quantifier $.quantifier;
 	has Expression::List:D $.arguments is required;
+	has OrderBy $.order-by;
+	has Conditions $.filter;
 
-	method new(Str $name, Expression::List $arguments) {
-		self.bless(:$name, :$arguments);
+	method new(Str $name, Expression::List $arguments, Conditions :$filter, Quantifier :$quantifier, OrderBy :$order-by) {
+		self.bless(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
 	}
 
-	method over(Conditions(Any) :$filter, Expression::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier :$existing) {
-		Window::Function.new(self, :$filter, :$partition-by, :$order-by, :$existing);
+	method precedence() {
+		$!filter ?? Precedence::Between !! Precedence::Termlike;
+	}
+
+	method over(*%arguments) {
+		my $window = Window::Definition.COERCE(%arguments);
+		Window::Function.new(self, $window);
 	}
 
 	method as(Identifier:D(Cool:D) $alias, Identifiers(Any) $columns?, Bool :$lateral, Bool :$ordinal) {
@@ -639,13 +719,88 @@ class Function does Term {
 	}
 }
 
-class Window::Definition {
-	has Identifier $.existing;
-	has Expression::List $.partition-by;
-	has OrderBy $.order-by;
+package Window {
+	enum Exclusion (:Current('current row'), :Group<group>, :Ties<ties>, :NoOthers('no others'));
+	enum Mode (:Rows<rows> :Range<range> :Groups<groups>);
 
-	method is-simple() {
-		$!existing && !$!partition-by && !$!order-by;
+	class Boundary::Preceding::Unbounded { ... }
+	class Boundary::Preceding::Bounded { ... }
+	class Boundary::CurrentRow { ... }
+	class Boundary::Following::Bounded { ... }
+	class Boundary::Following::Unbounded { ... }
+
+	role Boundary {
+#		method tag(--> Str) { ... }
+		multi method COERCE('preceding') { Boundary::Preceding::Unbounded.new }
+		multi method COERCE('current') { Boundary::CurrentRow.new }
+		multi method COERCE('following') { Boundary::Following::Unbounded.new }
+		multi method COERCE(Pair $ (Str :$key where 'preceding', Any :$value)) {
+			my $offset = expand-expression($value);
+			Boundary::Preceding::Bounded.new(:$offset);
+		}
+		multi method COERCE(Pair $ (Str :$key where 'following', Any :$value)) {
+			my $offset = expand-expression($value);
+			Boundary::Following::Bounded.new(:$offset);
+		}
+	}
+	role Boundary::Unbounded[Str $tag] does Boundary {
+		method tag() { $tag }
+	}
+	role Boundary::Bounded[Str $tag] does Boundary {
+		method tag() { $tag }
+
+		has Expression:D $.offset is required;
+	}
+	class Boundary::Preceding::Unbounded does Boundary::Unbounded['UNBOUNDED PRECEDING'] { }
+	class Boundary::Preceding::Bounded does Boundary::Bounded['PRECEDING'] { }
+	class Boundary::CurrentRow does Boundary::Unbounded['CURRENT ROW'] {}
+	class Boundary::Following::Bounded does Boundary::Bounded['FOLLOWING'] { }
+	class Boundary::Following::Unbounded does Boundary::Unbounded['UNBOUNDED FOLLOWING'] {}
+
+	class Frame {
+		has Window::Mode:D $.mode is required;
+		has Boundary:D $.from is required;
+		has Boundary $.to is required;
+		has Exclusion $.exclude;
+
+		method new(Mode $mode, Boundary $from, Boundary $to?, Exclusion :$exclude?) {
+			self.bless(:$mode, :$from, :$to, :$exclude);
+		}
+
+		method COERCE(Map $ (Boundary(Any) :$from, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode(Str) :$mode = Mode::Rows)) {
+			self.new($mode, $from, $to, :$exclude);
+		}
+	}
+
+	class Definition {
+		has Identifier $.existing;
+		has Expression::List $.partition-by;
+		has OrderBy $.order-by;
+		has Frame $.frame;
+
+		method is-simple() {
+			$!existing && !$!partition-by && !$!order-by;
+		}
+
+		method COERCE(Map (Expression::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Window::Frame(Map) :$frame)) {
+			self.new(:$existing, :$partition-by, :$order-by, :$frame);
+		}
+	}
+
+	class Clause {
+		has Identifier:D         $.name is required;
+		has Window::Definition:D $.definition is required;
+	}
+
+	class Clauses {
+		has Window::Clause @.windows;
+
+		multi method COERCE(@windows) {
+			self.bless(:@windows);
+		}
+		multi method COERCE(Window::Clause $window) {
+			self.bless(:windows[ $window ]);
+		}
 	}
 }
 
@@ -653,33 +808,15 @@ class Window::Function does Expression {
 	method precedence(--> Precedence::Comma) {}
 
 	has Function:D $.function is required;
-	has Conditions $.filter;
 	has Window::Definition:D $.window is required;
 
-	method new(Function:D $function, Conditions :$filter, Expression::List :$partition-by, OrderBy :$order-by, Identifier :$existing) {
-		my $window = Window::Definition.new(:$existing, :$partition-by, :$order-by);
-		self.bless(:$function, :$filter, :$window);
-	}
-}
-
-class Window {
-	has Identifier:D         $.name is required;
-	has Window::Definition:D $.definition is required;
-}
-
-class Windows {
-	has Window @.windows;
-
-	multi method COERCE(@windows) {
-		self.bless(:@windows);
-	}
-	multi method COERCE(Window $window) {
-		self.bless(:windows[ $window ]);
+	method new(Function:D $function, Window::Definition $window) {
+		self.bless(:$function, :$window);
 	}
 }
 
 class Locking {
-	enum Strength (:Update<UPDATE> :NoKeyUpdate('NO KEY UPDATE') :Share<SHARE> :KeyShare('KEY SHARE'));
+	enum Strength (:Update<update> :NoKeyUpdate('no key update') :Share<share> :KeyShare('key share'));
 
 	has Strength:D $.strength is required;
 	has Identifier $.table;
@@ -690,13 +827,11 @@ class Locking {
 		self.bless(:$strength, :$table, :$no-wait, :$skip-locked);
 	}
 
-	multi method COERCE(Str $name) {
-		my $strength = Strength.WHO{$name.lc.tc};
+	multi method COERCE(Strength(Str) $strength) {
 		self.new($strength);
 	}
-	multi method COERCE(Pair $ (:$key, Identifier(Cool) :$value)) {
-		my $strength = $key ~~ Strength ?? $key !! Strength.WHO{$key.lc.tc};
-		self.new($strength, $value);
+	multi method COERCE(Pair $ (Strength(Str) :$key, Identifier(Cool) :$value)) {
+		self.new($key, $value);
 	}
 }
 
@@ -715,7 +850,7 @@ class Compound {
 	method COERCE(Pair $pair) {
 		my $key = $pair.key.lc;
 		my $all = so $key ~~ s/ '-all' $ //;
-		my $type = Type.WHO{$key.tc};
+		my $type = Type.WHO{$key.lc.tc};
 		self.new($type, $pair.value, $all);
 	}
 }
@@ -729,6 +864,9 @@ class Limit {
 		self.bless(:$value);
 	}
 
+	multi method COERCE(Expression $value) {
+		self.new($value);
+	}
 	multi method COERCE(Int $value) {
 		self.new(Integer.new($value));
 	}
@@ -744,13 +882,16 @@ class Offset {
 		self.bless(:$value);
 	}
 
+	multi method COERCE(Expression $value) {
+		self.new($value);
+	}
 	multi method COERCE(Int $value) {
 		self.new(Integer.new($value));
 	}
 }
 
 class Source::Query { ... }
-role Keyword does Expression {
+role Query does Expression {
 	method precedence(--> Precedence::Rowlike) {}
 
 	method as(Identifier:D(Cool:D) $alias, Bool :$lateral) {
@@ -758,7 +899,7 @@ role Keyword does Expression {
 	}
 }
 
-class Values does Keyword {
+class Values does Query {
 	has Rows:D  $.rows is required;
 	has OrderBy $.order-by;
 	has Limit   $.limit;
@@ -787,9 +928,9 @@ class Common {
 	}
 	class Rename {
 		has Name:D $.alias is required;
-		has Keyword:D $.keyword is required;
-		method new(Name:D $alias, Keyword:D $keyword) {
-			self.bless(:$alias, :$keyword);
+		has Query:D $.query is required;
+		method new(Name:D $alias, Query:D $query) {
+			self.bless(:$alias, :$query);
 		}
 		method COERCE(Pair $pair) {
 			my Name:D(Any:D) $alias = $pair.key;
@@ -809,25 +950,28 @@ class Common {
 	}
 }
 
-role Keyword::Common does Keyword {
+role Query::Common does Query {
 	has Common(Any)      $.common-tables;
 }
 
-class Distinct::Full { ... }
-class Distinct::Columns { ... }
+class Distinction::Full { ... }
+class Distinction::Columns { ... }
 
-class Distinct {
+class Distinction {
 	multi submethod COERCE(Bool $value) {
-		$value ?? Distinct::Full.new !! Distinct;
+		$value ?? Distinction::Full.new !! Distinction;
+	}
+	multi submethod COERCE(Quantifier $value) {
+		$value ?? Distinction::Full.new !! Distinction;
 	}
 	multi submethod COERCE(Expression::List(Cool) $columns) {
-		Distinct::Columns.new($columns);
+		Distinction::Columns.new($columns);
 	}
 }
 
-class Distinct::Full is Distinct {}
+class Distinction::Full is Distinction {}
 
-class Distinct::Columns is Distinct {
+class Distinction::Columns is Distinction {
 	has Expression::List $.columns;
 
 	method new(Expression::List $columns) {
@@ -837,25 +981,25 @@ class Distinct::Columns is Distinct {
 }
 
 class GroupBy {
-	has Expression::List:D $.columns is required handles<elems>;
-	has Bool                  $.all;
+	has Expression::List:D $.columns is required handles<elements>;
+	has Bool               $.all;
 
 	method new(Expression::List:D(Any:D) $columns, Bool $all = False) {
 		self.bless(:$columns, :$all);
 	}
 }
 
-class Source { ... }
-class Table { ... }
+role Source { ... }
+role Table { ... }
 
-class Select does Keyword::Common {
+class Select does Query::Common {
 	has Expression::List:D $.columns is required;
-	has Distinct           $.distinct;
+	has Distinction        $.distinct;
 	has Source             $.source;
 	has Conditions         $.where;
 	has GroupBy            $.group-by;
 	has Conditions         $.having;
-	has Windows            $.windows;
+	has Window::Clauses    $.windows;
 	has Compound           $.compound;
 
 	has OrderBy            $.order-by;
@@ -864,7 +1008,7 @@ class Select does Keyword::Common {
 	has Locking            $.locking;
 }
 
-role Update does Keyword::Common {
+role Update does Query::Common {
 	has Table:D          $.target is required;
 	has Source           $.from;
 	has Conditions       $.where;
@@ -888,7 +1032,7 @@ role Updater::Select {
 }
 class Update::Select does Update does Updater::Select {}
 
-enum Overriding <System User>;
+enum Overriding (:System<system>, :User<user>);
 
 class Conflict::Target::Columns { ... }
 class Conflict::Target::Constraint { ... }
@@ -898,13 +1042,13 @@ role Conflict::Target {
 		Conflict::Target::Columns.new($value);
 	}
 	multi method COERCE(Pair $ (:$key where 'constraint', Identifier:D(Cool:D) :$value)) {
-		Conflict::Target::Columns.new($value);
+		Conflict::Target::Constraint.new($value);
 	}
 }
 
 class Conflict::Target::Columns does Conflict::Target {
 	has Identifiers:D $.columns is required;
-	has Conditions      $.where;
+	has Conditions    $.where;
 
 	method new(Identifiers:D $columns, Conditions $where?) {
 		self.bless(:$columns, :$where);
@@ -919,8 +1063,8 @@ class Conflict::Target::Constraint does Conflict::Target {
 }
 
 class Conflict::Nothing { ... }
-role Conflict::Update { ... }
 
+role Conflict::Update { ... }
 role Conflict {
 	has Conflict::Target $.target;
 
@@ -942,15 +1086,19 @@ class Conflict::Nothing does Conflict {
 }
 
 class Conflict::Update::Pairwise { ... }
+class Conflict::Update::Row { ... }
+class Conflict::Update::Select { ... }
 role Conflict::Update does Conflict {
 	has Conditions $.where;
 
 	multi submethod COERCE(Pair $ (:$key, Assigns:D(Cool:D) :$value)) {
 		Conflict::Update::Pairwise.new($key, $value);
 	}
-	multi submethod COERCE(Pair $ (:$key, Row:D :$value)) {
+	multi submethod COERCE(Pair $ (:$key, Pair:D :$value (:key($columns), :value($row)))) {
+		Conflict::Update::Row.new($key, $columns, $row);
 	}
 	multi submethod COERCE(Pair $ (:$key, Select:D :$value)) {
+		Conflict::Update::Select.new($key, $value);
 	}
 }
 
@@ -961,8 +1109,8 @@ class Conflict::Update::Pairwise does Conflict::Update does Updater::Pairwise {
 }
 
 class Conflict::Update::Row does Conflict::Update does Updater::Row {
-	method new(Conflict::Target:D $target, Row:D $row, Conditions $where?) {
-		self.bless(:$target, :$where, :$row);
+	method new(Conflict::Target:D $target, Identifiers:D $columns, Row:D $row, Conditions $where?) {
+		self.bless(:$target, :$where, :$columns, :$row);
 	}
 }
 
@@ -972,7 +1120,7 @@ class Conflict::Update::Select does Conflict::Update does Updater::Select {
 	}
 }
 
-role Insert does Keyword::Common {
+role Insert does Query::Common {
 	has Table:D          $.target is required;
 	has Identifiers      $.fields;
 	has Overriding       $.overriding;
@@ -991,7 +1139,7 @@ class Insert::Select does Insert {
 class Insert::Defaults does Insert {
 }
 
-class Delete does Keyword::Common {
+class Delete does Query::Common {
 	has Table:D          $.target is required;
 	has Source           $.using;
 	has Conditions       $.where;
@@ -1001,50 +1149,46 @@ class Delete does Keyword::Common {
 class Join::On { ... }
 class Join::Conditions { ... }
 class Join::Using { ... }
+class Table::Simple { ... }
 class Table::Renamed { ... }
 
-enum Join::Type <Inner Left Right Outer>;
+enum Join::Type (:Inner<inner>, :Left<left>, :Right<right>, :Outer<outer>);
 
-class Source {
-	multi submethod COERCE(Cool $pre-source) {
-		Table.COERCE($pre-source);
+role Source {
+	multi submethod COERCE(Identifier:D(Cool:D) $pre-source) {
+		Table::Simple.new($pre-source);
 	}
-	multi submethod COERCE(Pair $pair) {
-		Table::Renamed.COERCE($pair);
+	multi submethod COERCE(Pair $ (Identifier:D(Cool:D) :$key, Table(Cool) :$value)) {
+		Table::Renamed.new($value, $key);
+	}
+	multi submethod COERCE(Pair $ (Identifier:D(Cool:D) :$key, Query:D :$value)) {
+		Source::Query.new($value, $key);
+	}
+	multi submethod COERCE(Pair (Identifier:D(Cool:D) :$key, Function:D :$value)) {
+		Source::Function.new($value, $key);
 	}
 
-	multi method join(Source:D(Any:D) $right, Join::Conditions(Any) :$on!, Join::Type :$type = Join::Type::Inner) {
+	multi method join(Source:D(Any:D) $right, Join::Conditions(Any) :$on!, Join::Type(Str) :$type = Join::Type::Inner) {
 		Join::On.new(:left(self), :$right, :$on, :$type);
 	}
-	multi method join(Source:D(Any:D) $right, Identifiers(Any) :$using!, Join::Type :$type = Join::Type::Inner) {
+	multi method join(Source:D(Any:D) $right, Identifiers(Any) :$using!, Join::Type(Str) :$type = Join::Type::Inner) {
 		Join::Using.new(:left(self), :$right, :$using, :$type);
 	}
-	multi method join(Source:D(Any:D) $right, Bool :$natural!, Join::Type :$type = Join::Type::Inner) {
+	multi method join(Source:D(Any:D) $right, Bool :$natural!, Join::Type(Str) :$type = Join::Type::Inner) {
 		Join::Natural.new(:left(self), :$right, :$type);
 	}
 	multi method join(Source:D(Any:D) $right, Bool :$cross!) {
 		Join::Cross.new(:left(self), :$right);
 	}
 
-	method select(Expression::List:D(Any:D) $columns = *, Conditions(Any) $where?, Common(Any) :$common-tables, Distinct(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Windows :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) {
+	method select(Expression::List:D(Any:D) $columns = *, Conditions(Any) $where?, Common(Any) :$common-tables, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) {
 		Select.new(:$common-tables, :$distinct, :$columns, :source(self), :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
 	}
 }
 
-class Table is Source does Keyword {
+role Table does Source {
 	has Identifier:D $.name is required;
 	has Bool         $.only;
-
-	method new(Identifier:D $name, Bool :$only) {
-		self.bless(:$name, :$only);
-	}
-
-	multi method COERCE(Identifier:D(Cool:D) $name) {
-		self.new($name);
-	}
-	multi method COERCE(Pair $ (Identifier:D(Cool:D) :$key, Source(Any) :$value)) {
-		Table::Renamed.new($value, $key);
-	}
 
 	multi method update(Assigns:D(Any:D) $assigns, Conditions(Any) $where?, Source(Any) :$from, Expression::List(Any) :$returning) {
 		Update::Pairwise.new(:target(self), :$assigns, :$where, :$from, :$returning);
@@ -1073,6 +1217,19 @@ class Table is Source does Keyword {
 		Delete.new(:target(self), :$where, :$using :$returning);
 	}
 
+	multi method concat(Identifier $column) {
+		Identifier.new($!name.concat($column));
+	}
+	multi method concat(Identifiers $columns) {
+		$columns.elements.map: { self.concat($^column) };
+	}
+}
+
+class Table::Simple does Table does Query {
+	method new(Identifier:D $name, Bool :$only) {
+		self.bless(:$name, :$only);
+	}
+
 	proto method as(|) { * }
 	multi method as(Identifier:D(Cool:D) $alias) {
 		Table::Renamed.new(self, $alias);
@@ -1083,31 +1240,20 @@ class Table is Source does Keyword {
 	multi method as(Pair $pair) {
 		Table::Renamed.new(self, $pair.key, $pair.value);
 	}
-
-	multi method concat(Identifier $column) {
-		Identifier.new($!name.concat($column));
-	}
-	multi method concat(Identifiers $columns) {
-		$columns.elems.map: { self.concat($^column) };
-	}
 }
 
-role Source::Aliased is Source {
+role Source::Aliased does Source {
 	has Identifier:D $.alias is required;
 	has Identifiers $.columns;
 }
 
-class Table::Renamed is Table does Source::Aliased {
+class Table::Renamed does Table does Source::Aliased {
 	method new(Table:D $table, Identifier:D $alias, Identifiers $columns?) {
 		self.bless(:name($table.name), :only($table.only), :$alias, :$columns);
 	}
-
-	method COERCE(Pair $ (Identifier:D(Cool:D) :$key, Table(Any) :$value)) {
-		self.new($value, $key);
-	}
 }
 
-class Join is Source {
+class Join does Source {
 	has Source:D $.left is required;
 	has Source:D $.right is required;
 }
@@ -1146,15 +1292,15 @@ class Join::Natural is Join {
 
 class Join::Cross is Join {}
 
-role Source::Nested does Source::Aliased {
+role Source::Nested does Source does Source::Aliased {
 	has Bool $.lateral;
 }
 
 class Source::Query does Source::Nested {
-	has Keyword:D $.keyword is required;
+	has Query:D $.query is required;
 
-	multi method new(Keyword:D $keyword, Identifier:D $alias, Identifiers $columns?, Bool :$lateral) {
-		self.bless(:$keyword, :$alias, :$columns, :$lateral);
+	multi method new(Query:D $query, Identifier:D $alias, Identifiers $columns?, Bool :$lateral) {
+		self.bless(:$query, :$alias, :$columns, :$lateral);
 	}
 }
 
@@ -1172,7 +1318,7 @@ role Placeholders {
 	method bind(Any $value) { ... }
 }
 
-class Placeholders::DBIish does Placeholders {
+class Placeholders::DBI does Placeholders {
 	method bind(Any $value --> Str) {
 		@!values.push($value);
 		'?';
@@ -1204,11 +1350,12 @@ class Delayed {
 	}
 }
 
-class Prepared {
-	has @.arguments;
+class Result {
+	has Str:D $.sql is required;
+	has @.arguments is required;
 
-	method new(@arguments) {
-		self.bless(:@arguments);
+	method new(Str:D $sql, @arguments?) {
+		self.bless(:$sql, :@arguments);
 	}
 
 	multi type-of(Any $value) {
@@ -1233,29 +1380,13 @@ class Prepared {
 			die "No value given for delayed value '$delayed.identifier()'"
 		}
 	}
+
 	method resolve(%replacements?) {
 		@!arguments.map: { resolve-value(%replacements, $^element) };
 	}
 
 	method identifiers() {
 		@!arguments.grep(Delayed)».identifier;
-	}
-}
-
-class Result {
-	has Str:D $.sql is required;
-	has Any @.arguments;
-	method new(Str:D $sql, @arguments) {
-		self.bless(:$sql, :@arguments);
-	}
-}
-
-class Result::Prepared {
-	has Str:D $.sql is required;
-	has Prepared:D $.prepared is required handles<resolve type-hints identifiers>;
-	method new(Str:D $sql, @arguments) {
-		my $prepared = Prepared.new(@arguments);
-		self.bless(:$sql, :$prepared);
 	}
 }
 
@@ -1271,17 +1402,22 @@ role Expression::Custom does Expression {
 
 class Renderer::SQL does Renderer {
 	has Placeholders $.placeholders is required;
-	has Any:U $.result-class = Result;
 	has Bool:D $.quoting = False;
 
 	my sub parenthesize-if(Str $input, Bool() $parenthese --> Str) {
 		$parenthese ?? "($input)" !! $input;
 	}
+	my sub parenthesize-list(@items, Str $with = " ") {
+		"({ @items.join($with) })";
+	}
 
-	method render-expression-list(Placeholders $arguments, @elements, Bool $parenthesize --> Str) {
-		my $precedence = @elements > 1 ?? Precedence::Comma !! Precedence::Rowlike;
-		my @elems = @elements.map: { self.render-expression($arguments, $^element, $precedence) };
-		parenthesize-if(@elems.join(', '), $parenthesize);
+	method render-expressions(Placeholders $placeholders, @elements, Precedence $precedence = Precedence::Comma, Str $with = ', ') {
+		@elements.map({ self.render-expression($placeholders, $^element, $precedence) }).join($with);
+	}
+
+	method render-expression-list(Placeholders $placeholders, @elements, Bool $parenthesize --> Str) {
+		my $result = self.render-expressions($placeholders, @elements, Precedence::Comma);
+		parenthesize-if($result, $parenthesize);
 	}
 
 	method quote-identifier(Str $identifier --> Str) {
@@ -1308,8 +1444,8 @@ class Renderer::SQL does Renderer {
 	multi method render-expression(Placeholders $placeholders, Constant $constant, Precedence --> Str) {
 		~$constant;
 	}
-	multi method render-expression(Placeholders $placeholders, Parentheses $parentheses, Precedence --> Str) {
-		"({ self.render-expression($placeholders, $parentheses.inner, Precedence::Comma) })";
+	multi method render-expression(Placeholders $placeholders, Expression::List $parentheses, Precedence --> Str) {
+		self.render-expression-list($placeholders, $parentheses.elements, False);
 	}
 	multi method render-expression(Placeholders $placeholders, Row $row, Precedence --> Str) {
 		'ROW' ~ self.render-expression-list($placeholders, $row.elements, True);
@@ -1324,17 +1460,14 @@ class Renderer::SQL does Renderer {
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Case $case, Precedence $ --> Str) {
 		my @result = 'CASE';
-		@result.append: self.render-expression($placeholders, $case.left, Precedence::Comma);
+		@result.append: self.render-expression($placeholders, $case.left, Precedence::Comma) with $case.left;
 		@result.append: $case.whens.map: { self.render-when($placeholders, $^when) };
 		@result.append: 'ELSE', self.render-expression($placeholders, $case.else, Precedence::Comma) with $case.else;
 		@result.append: 'END';
 		@result.join(' ');
 	}
-	multi method render-expression(Placeholders $placeholders, Function $function, Precedence --> Str) {
-		$function.name ~ self.render-column-expressions($placeholders, $function.arguments, :parenthesize);
-	}
-	multi method render-expression(Placeholders $placeholders, Op::Unary::Prefix::Tight $op, Precedence --> Str) {
-		my $primary = self.render-expression($placeholders, $op.value, Precedence::TightPrefix);
+	multi method render-expression(Placeholders $placeholders, Op::Prefix $op, Precedence --> Str) {
+		my $primary = self.render-expression($placeholders, $op.value, Precedence::Prefix);
 		$op.operator ~ $primary;
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Binary $op, Precedence --> Str) {
@@ -1342,29 +1475,46 @@ class Renderer::SQL does Renderer {
 		my $right = self.render-expression($placeholders, $op.right, $op.precedence);
 		"$left $op.operator() $right";
 	}
-	multi method render-expression(Placeholders $placeholders, Op::Unary::Postfix $op, Precedence --> Str) {
+	sub null-if(Bool $bool) {
+		$bool ?? 'NOT' !! Empty
+	}
+	multi method render-expression(Placeholders $placeholders, Op::Liking $liking, Precedence --> Str) {
+		my @result;
+		@result.push: self.render-expression($placeholders, $liking.left, $liking.precedence);
+		@result.push: null-if($liking.negated), $liking.operator();
+		@result.push: self.render-expression($placeholders, $liking.right, $liking.precedence);
+		@result.push: 'ESCAPE', self.render-expression($placeholders, $liking.escape, $liking.precedence) with $liking.escape;
+		@result.join(' ');
+	}
+	multi method render-expression(Placeholders $placeholders, Op::Postfix $op, Precedence --> Str) {
 		my $value = self.render-expression($placeholders, $op.value, Precedence::Postfix);
 		"$value $op.postfix()";
 	}
-	multi method render-expression(Placeholders $placeholders, Op::Unary::Prefix::Loose $op, Precedence --> Str) {
-		my $primary = self.render-expression($placeholders, $op.value, Precedence::LoosePrefix);
-		"$op.operator() $primary";
+	multi method render-expression(Placeholders $placeholders, Op::Not $op, Precedence --> Str) {
+		my $primary = self.render-expression($placeholders, $op.value, Precedence::Not);
+		"NOT $primary";
 	}
-	multi method render-expression(Placeholders $placeholders, Op::ListCompare $in, Precedence --> Str) {
+	multi method render-expression(Placeholders $placeholders, Op::In $in, Precedence --> Str) {
 		my $left = self.render-expression($placeholders, $in.left, $in.precedence);
-		my $candidates = self.render-expression-list($placeholders, $in.elements, True);
-		"$left $in.operator() $candidates";
+		my $candidates = self.render-expression($placeholders, $in.expression, Precedence::Comma);
+		my $operator = $in.negated ?? 'NOT IN' !! 'IN';
+		"$left $operator $candidates";
+	}
+	multi method render-expression(Placeholders $placeholders, Op::Exists $in, Precedence --> Str) {
+		my $left = self.render-expression($placeholders, $in.left, $in.precedence);
+		my $candidates = self.render-expression($placeholders, $in.query, Precedence::Comma);
+		my $operator = $in.negated ?? 'NOT EXISTS' !! 'EXISTS';
+		"$left $operator $candidates";
 	}
 	multi method render-expression(Placeholders $placeholders, Op::BetweenLike $between, Precedence --> Str) {
 		my $left = self.render-expression($placeholders, $between.left, Precedence::Between);
 		my $min = self.render-expression($placeholders, $between.min, Precedence::Between);
 		my $max = self.render-expression($placeholders, $between.max, Precedence::Between);
-		my @not = $between.negated ?? 'NOT' !! Empty;
+		my @not = null-if($between.negated);
 		($left, |@not, 'BETWEEN', $min, 'AND', $max).join(' ');
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Logical $logical, Precedence --> Str) {
-		my @elems = $logical.elements.map: { self.render-expression($placeholders, $^element, $logical.precedence) };
-		@elems.join(" $logical.operator() ");
+		self.render-expressions($placeholders, $logical.elements, $logical.precedence, " $logical.operator() ");
 	}
 	multi method render-expression(Placeholders $placeholders, Identifier $column, Precedence --> Str) {
 		self.render-identifier($column);
@@ -1376,48 +1526,85 @@ class Renderer::SQL does Renderer {
 	}
 	multi method render-expression(Placeholders $placeholders, Star, Precedence --> '*') {}
 
+	multi method render-quantifier(Quantifier:D $quantifier) {
+		$quantifier.uc;
+	}
+	multi method render-quantifier(Quantifier:U) {
+		Empty;
+	}
+
+	multi method render-expression(Placeholders $placeholders, Function $function, Precedence --> Str) {
+		my @expressions = self.render-quantifier($function.quantifier);
+		@expressions.append: self.render-column-expressions($placeholders, $function.arguments);
+		@expressions.append: self.render-order-by($placeholders, $function.order-by);
+		my $expression = @expressions.join(' ');
+		my @result = "{ $function.name() }($expression)";
+		@result.push: 'FILTER', parenthesize-list(self.render-conditions($placeholders, $function.filter, 'WHERE')) with $function.filter;
+		@result.join(' ');
+	}
+
+	multi method render-window-boundary(Placeholders $placeholders, Window::Boundary::Unbounded $boundary) {
+		$boundary.tag;
+	}
+	multi method render-window-boundary(Placeholders $placeholders, Window::Boundary::Bounded $boundary) {
+		self.render-expression($placeholders, $boundary.offset, Precedence::Between), $boundary.tag;
+	}
+
+	multi method render-window-frame(Placeholders $placeholders, Window::Frame:D $frame) {
+		my $mode = $frame.mode.uc;
+		my @exclusion = $frame.exclude.defined ?? ('EXCLUDE', $frame.exclude.uc) !! Empty;
+		my $from = self.render-window-boundary($placeholders, $frame.from);
+		$mode, $from, |@exclusion;
+	}
+	multi method render-window-frame(Placeholders $placeholders, Window::Frame:D $frame where .to.defined) {
+		my $mode = $frame.mode.uc;
+		my $from = self.render-window-boundary($placeholders, $frame.from);
+		my $to = self.render-window-boundary($placeholders, $frame.to);
+		my @exclusion = $frame.exclude.defined ?? ('EXCLUDE', $frame.exclude.uc) !! Empty;
+		$mode, 'BETWEEN', $from, 'AND', $to, |@exclusion;
+	}
+	multi method render-window-frame(Placeholders $placeholders, Window::Frame:U $frame) {
+		Empty;
+	}
+
 	multi method render-window-definition(Placeholders $placeholders, Window::Definition $definition --> Str) {
 		my @inner;
 		@inner.push: self.render-identifier($definition.existing) with $definition.existing;
 		@inner.push: self.render-column-expressions($placeholders, $definition.partition-by, 'PARTITION BY');
 		@inner.push: self.render-order-by($placeholders, $definition.order-by);
-		"({ @inner.join(' ') })";
+		@inner.push: self.render-window-frame($placeholders, $definition.frame);
+		parenthesize-list(@inner);
 	}
 	multi method render-window-definition(Placeholders $placeholders, Window::Definition $definition where .is-simple --> Str) {
 		self.render-identifier($definition.existing);
 	}
 
 	multi method render-expression(Placeholders $placeholders, Window::Function $column, Precedence --> Str) {
-		my @result;
-		@result.push: self.render-expression($placeholders, $column.function, Precedence::Comma);
-		@result.push: self.render-conditions($placeholders, $column.filter, 'FILTER WHERE');
-		@result.push: 'OVER';
-		@result.push: self.render-window-definition($placeholders, $column.window);
-		@result.join(' ');
+		my $function = self.render-expression($placeholders, $column.function, Precedence::Comma);
+		my $definition = self.render-window-definition($placeholders, $column.window);
+		"$function OVER $definition";
 	}
 
-	multi method render-distinct(Placeholders $placeholders, Distinct::Columns:D $source --> List) {
-		'DISTINCT ON', self.render-expression-list($placeholders, $source.columns.elems, True);
+	multi method render-distinct(Placeholders $placeholders, Distinction::Columns:D $source --> List) {
+		'DISTINCT ON', self.render-expression-list($placeholders, $source.columns.elements, True);
 	}
-	multi method render-distinct(Placeholders $placeholders, Distinct::Full:D $source, --> Str) {
+	multi method render-distinct(Placeholders $placeholders, Distinction::Full:D $source, --> Str) {
 		'DISTINCT';
 	}
-	multi method render-distinct(Placeholders $placeholders, Distinct:U $source --> List) {
+	multi method render-distinct(Placeholders $placeholders, Distinction:U $source --> List) {
 		Empty;
 	}
 
-	multi method render-column-expressions(Placeholders $placeholders, Expression::List:D $columns, Str $prefix?, Bool :$parenthesize --> List) {
-		my @elems = $columns.elems.map: { self.render-expression($placeholders, $^column, Precedence::Comma) };
-		my $results = parenthesize-if(@elems.join(', '), $parenthesize);
+	multi method render-column-expressions(Placeholders $placeholders, Expression::List:D $columns, Str $prefix? --> List) {
+		my $results = self.render-expressions($placeholders, $columns.elements);
 		$prefix ?? ($prefix, $results) !! ($results,);
 	}
-	multi method render-column-expressions(Placeholders $placeholders, Expression::List:U $columns, Str $prefix?, Bool :$parenthesize --> List) {
+	multi method render-column-expressions(Placeholders $placeholders, Expression::List:U $columns, Str $prefix? --> List) {
 		Empty;
 	}
 
 	multi method render-identifiers(Identifiers:D $columns --> Str) {
-		my @elems = $columns.elems.map: { self.render-identifier($^column) };
-		"({ @elems.join(', ') })";
+		parenthesize-list($columns.elements.map({ self.render-identifier($^column) }), ', ');
 	}
 	multi method render-identifiers(Identifiers:U $columns --> List) {
 		Empty;
@@ -1442,11 +1629,11 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-source-nested(Placeholders $placeholders, Source::Query $query --> Str) {
-		self.render-expression($placeholders, $query.keyword, Precedence::Rowlike);
+		self.render-expression($placeholders, $query.query, Precedence::Comma);
 	}
 	multi method render-source-nested(Placeholders $placeholders, Source::Function $function --> Str) {
 		my $result = self.render-expression($placeholders, $function.function, Precedence::Rowlike);
-		$function.ordinal ?? "$result WITH ORDINALITY" !! $result;
+		$function.ordinal ?? "($result WITH ORDINALITY)" !! "($result)";
 	}
 
 	multi method render-source(Placeholders $, Table $table --> List) {
@@ -1455,7 +1642,7 @@ class Renderer::SQL does Renderer {
 	multi method render-source(Placeholders $placeholders, Source::Nested $nested --> List) {
 		my @lateral = $nested.lateral ?? 'LATERAL' !! Empty;
 		my $rendered = self.render-source-nested($placeholders, $nested);
-		|@lateral, "($rendered)", self.render-source-alias($nested);
+		|@lateral, $rendered, self.render-source-alias($nested);
 	}
 
 	multi method render-join-type(Placeholders $placeholders, Join::Natural $join) {
@@ -1497,7 +1684,7 @@ class Renderer::SQL does Renderer {
 	method render-common-table(Placeholders $placeholders, Common::Rename $rename --> List) {
 		my $alias      = self.render-identifier($rename.alias.name);
 		my @columns    = self.render-identifiers($rename.alias.columns);
-		my $expression = self.render-expression($placeholders, $rename.keyword, Precedence::Comma);
+		my $expression = self.render-expression($placeholders, $rename.query, Precedence::Comma);
 		$alias, 'AS', $expression;
 	}
 
@@ -1518,13 +1705,16 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-expression(Placeholders $placeholders, Order::Modifier $column, Precedence --> Str) {
-		"{ self.render-expression($placeholders, $column.column, Precedence::Comma) } $column.order()";
+		my @result = self.render-expression($placeholders, $column.column, Precedence::Comma);
+		@result.push: $column.order.uc if $column.order;
+		@result.push: 'NULLS', $column.nulls.uc if $column.nulls;
+		@result.join(' ');
 	}
 
 	multi method render-group-by(Placeholders $placeholders, GroupBy:D $group-by, Conditions $conditions --> List) {
 		my @result = 'GROUP BY';
 		@result.push: 'ALL' if $group-by.all;
-		@result.push: self.render-expression-list($placeholders, $group-by.elems, False);
+		@result.push: self.render-expression-list($placeholders, $group-by.elements, False);
 		@result.push: self.render-conditions($placeholders, $conditions, 'HAVING');
 		@result;
 	}
@@ -1532,14 +1722,14 @@ class Renderer::SQL does Renderer {
 		Empty;
 	}
 
-	method render-window(Placeholders $placeholders, Window $window --> Str) {
+	method render-window(Placeholders $placeholders, Window::Clause $window --> Str) {
 		"WINDOW $window.name() AS { self.render-window-definition($window.definition) }";
 	}
 
-	multi method render-windows(Placeholders $placeholders, Windows:D $windows --> List) {
+	multi method render-windows(Placeholders $placeholders, Window::Clauses:D $windows --> List) {
 		$windows.windows.map({ self.render-window($placeholders, $^window) }).join(', ');
 	}
-	multi method render-windows(Placeholders $placeholders, Windows:U $windows --> List) {
+	multi method render-windows(Placeholders $placeholders, Window::Clauses:U $windows --> List) {
 		Empty;
 	}
 
@@ -1553,8 +1743,7 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-order-by(Placeholders $placeholders, OrderBy:D $sorters --> List) {
-		my @elems = $sorters.elems.map: { self.render-expression($placeholders, $^column, Precedence::Comma) };
-		'ORDER BY', @elems.join(', ');
+		'ORDER BY', self.render-expressions($placeholders, $sorters.elements);
 	}
 	multi method render-order-by(Placeholders $placeholders, OrderBy:U $sorters --> List) {
 		Empty;
@@ -1562,13 +1751,13 @@ class Renderer::SQL does Renderer {
 
 	multi method render-limit-offset(Placeholders $placeholders, Limit $limit, Offset $offset --> List) {
 		my @result;
-		@result.push: 'LIMIT',  self.render-expression($placeholders, $limit.value,  Precedence::LoosePrefix) with $limit;
-		@result.push: 'OFFSET', self.render-expression($placeholders, $offset.value, Precedence::LoosePrefix) with $offset;
+		@result.push: 'LIMIT',  self.render-expression($placeholders, $limit.value,  Precedence::Between) with $limit;
+		@result.push: 'OFFSET', self.render-expression($placeholders, $offset.value, Precedence::Between) with $offset;
 		@result;
 	}
 
 	multi method render-locking(Locking:D $locking --> List) {
-		my @result = 'FOR', $locking.strength;
+		my @result = 'FOR', $locking.strength.uc;
 		@result.push('OF', self.render-identifier($locking.table)) with $locking.table;
 		@result.push('NOWAIT') if $locking.no-wait;
 		@result.push('SKIP LOCKED') if $locking.skip-locked;
@@ -1606,7 +1795,7 @@ class Renderer::SQL does Renderer {
 	}
 	multi method render-update-values(Placeholders $placeholders, Updater::Row $update) {
 		my $columns = self.render-identifiers($update.columns);
-		my $expression = self.render-expression($placeholders, $update.row, Precedence::Rowlike);
+		my $expression = self.render-expression-list($placeholders, $update.row.elements, True);
 		"SET $columns = $expression";
 	}
 	multi method render-update-values(Placeholders $placeholders, Updater::Select $update) {
@@ -1634,7 +1823,7 @@ class Renderer::SQL does Renderer {
 	}
 
 	method render-values(Placeholders $placeholders, Rows $rows) {
-		my @values = $rows.elems.map({ self.render-expression-list($placeholders, $^row.elements, True) });
+		my @values = $rows.elements.map({ self.render-expression-list($placeholders, $^row.elements, True) });
 		'VALUES', @values.join(', ');
 	}
 
@@ -1712,10 +1901,10 @@ class Renderer::SQL does Renderer {
 		"TABLE { self.render-table($table) }";
 	}
 
-	method render(Expression $expression, :$result-class = $!result-class) {
+	method render(Expression $expression) {
 		my $placeholders = self.placeholders.new;
 		my $sql          = self.render-expression($placeholders, $expression, Precedence::Rowlike);
-		$result-class.new($sql, $placeholders.values);
+		Result.new($sql, $placeholders.values);
 	}
 }
 
@@ -1726,62 +1915,41 @@ multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 
-#proto method select(|) { * }
-#multi method select(Source:D(Any:D) $source, :$result-class!, |arguments) {
-#	my $select = $source.select(|arguments);
-#	$!renderer.render($select, :$result-class);
-#}
 method select(Source:D(Any:D) $source, |arguments) {
 	my $select = $source.select(|arguments);
 	$!renderer.render($select);
 }
 
-multi method insert(Table:D(Any:D) $target, :$result-class!, |arguments) {
-	my $insert = $target.insert(|arguments);
-	$!renderer.render($insert, :$result-class);
-}
-multi method insert(Table:D(Any:D) $target, |arguments) {
+method insert(Table:D(Any:D) $target, |arguments) {
 	my $insert = $target.insert(|arguments);
 	$!renderer.render($insert);
 }
 
-multi method update(Table:D(Any:D) $target, :$result-class!, |arguments) {
-	my $update = $target.update(|arguments);
-	$!renderer.render($update, :$result-class);
-}
-multi method update(Table:D(Any:D) $target, |arguments) {
+method update(Table:D(Any:D) $target, |arguments) {
 	my $update = $target.update(|arguments);
 	$!renderer.render($update);
 }
 
-multi method delete(Table:D(Any:D) $target, :$result-class!, |arguments) {
-	my $delete = $target.delete(|arguments);
-	$!renderer.render($delete, :$result-class);
-}
-multi method delete(Table:D(Any:D) $target, |arguments) {
+method delete(Table:D(Any:D) $target, |arguments) {
 	my $delete = $target.delete(|arguments);
 	$!renderer.render($delete);
 }
 
-multi method values(Rows:D $rows, OrderBy :$order-by, Limit :$limit, Offset :$offset, :$result-class) {
-	my $values = Values.new(:$rows, :$order-by, :$limit, :$offset);
-	$!renderer.render($values, :$result-class);
-}
 multi method values(Rows:D $rows, OrderBy :$order-by, Limit :$limit, Offset :$offset) {
 	my $values = Values.new(:$rows, :$order-by, :$limit, :$offset);
 	$!renderer.render($values);
 }
 
 method begin() {
-	'BEGIN', [];
+	Result.new('BEGIN');
 }
 
 method rollback() {
-	'ROLLBACK',  [];
+	Result.new('ROLLBACK');
 }
 
 method commit() {
-	'COMMIT', [];
+	Result.new('COMMIT');
 }
 
 
@@ -1795,20 +1963,38 @@ multi method table(Table:D(Any:D) $table, Pair :$as!) {
 	$table.as($as.key, $as.value);
 }
 
-method ident(Identifier(Cool) $ident) {
+method identifier(Identifier(Cool) $ident) {
 	$ident;
 }
 
-method function(Str $name, Expression::List:D(Any:D) $arguments = ()) {
-	Function.new($name, $arguments);
+method binary(Str $operator, Expression $left, Expression $right, *%args) {
+	my $class = %binary-op-for{$operator.lc}:exists ?? %binary-op-for{$operator.lc} !! die "No such operator '$operator'";
+	$class.new($left, $right, |%args);
 }
 
-method value(Placeholder(Any) $value) {
-	$value;
+method logical(Str $operator, @expressions) {
+	my $class = $operator.lc eq 'and' ?? Op::And !! $operator.lc eq 'or' ?? Op::Or !! die "No such operator '$operator'";
+	$class.new(@expressions);
+}
+
+method not(Expression $expression) {
+	Op::Not.new($expression)
+}
+
+method function(Str $name, Expression::List:D(Any:D) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) {
+	Function.new($name, $arguments, :$filter, :$quantifier, :$order-by);
+}
+
+method value(Any $value) {
+	expand-expression($value);
+}
+
+method delayed(|arguments) {
+	Delayed.new(|arguments);
 }
 
 multi method conflict(Any:D :$do where 'nothing') {
-	Conflict.COERCE((Conflict::Target) => $do);
+	Conflict.COERCE($do);
 }
 multi method conflict(Identifiers(Any) :$columns!, Any:D :$do) {
 	Conflict.COERCE(:$columns => $do);
@@ -1844,8 +2030,8 @@ use SQL::Abstract;
 
 my $placeholders = SQL::Abstract::Placeholders::Postgres;
 my $abstract = SQL::Abstract.new(:$placeholders);
-my ($sql, @arguments) = $abstract.select('table', <foo bar>, :id(3));
-my $result = $dbh.query($sql, @arguments);
+my $query = $abstract.select('table', <foo bar>, :id(3));
+my $result = $dbh.query($result.sql, $result.arguments);
 
 my $join = $abstract.table('books').join('authors', :using<author_id>);
 my ($sql, $arguments) = $abstract.select($join, [<book name>, <author name>], { <book cost> => { '<' => 10 }});
@@ -1857,16 +2043,18 @@ my ($sql, $arguments) = $abstract.select($join, [<book name>, <author name>], { 
 SQL::Abstract abstracts the generation of SQL queries. Fundamentally its functionality has three components
 
 =item1 An AST to represent SQL queries
-=item1 A set of helpers to convert standard raku datatypes
+=item1 A set of helpers to convert standard raku datatypes into such an AST
 =item1 A renderer to turn that AST into an SQL query
 
-It should 
+It should be able to represent any C<SELECT>, C<UPDATE>, C<INSERT>, or C<DELETE> query that is valid in both Postgresql and SQLite. This subset should be generally portable to other databases as well (
 
 =head1 Helper types
 
-SQL::Abstract uses 
+SQL::Abstract uses various helper types to aid
 
 =head2 SQL::Abstract::Source
+
+A source is source of data, usually a table or a join. If not passed as a C<Source> object it will upconvert from the following types:
 
 =begin item2
 Str
@@ -1883,14 +2071,14 @@ This will select from the named table, with the elements of the list representin
 =begin item2
 Pair
 
-This will select from the table in the pair value, and rename it to the key of the pair (C<value AS key>).
+This will rename the table in the value to the name in the key.
 =end item2
 
-It also has a C<select> method that works like C<SQL::Abstract>'s select
+It also has a C<select> method that works like C<SQL::Abstract>'s select except returns a C<Select> object instead of a rendered query, and it doesn't take a C<Source> as first argument.
 
-=head2 SQL::Abstract::Table
+=head2 SQL::Abstract::Table does SQL::Abstract::Source
 
-This class 
+This class takes the same 
 
 =head2 SQL::Abstract::Identifier
 
@@ -1906,37 +2094,73 @@ List
 This will fetch the given columns, with the elements of the list representing the components of the column name. E.g. C<< <bar baz> >> is equivalent to C< "bar.baz" >.
 =end item2
 
-=begin item2
-Whatever
-
-This will fetch all columns
-=end item2
-
-=begin item2
-Pair
-
-This will fetch the given column, and if the value of the pair is not a boolean it will rename the column (C<value AS key>). If the value is boolean it's equivalent to the key as string.
-
-=end item2
-
-
-
 =head2 SQL::Abstract::Identifiers
 
-This takes either a list of C<Identifier()>, or a single C<Identifier()>.
+This takes either a list of C<Identifier()>, or a single C<Identifier()>. Note that a single list will be interpreted will be interpreted as a list of string identifiers, if one wants to pass a single list-from identifier the list must be nested (e.g. C<[ <table column>,]>).
 
 =head2 SQL::Abstract::Expression::List
 
-This 
+This is a list much like C<Identifiers>, however it will accept not just identifiers but any expression (e.g. comparisons, function calls, etc…). If given a pair it will rename the value to the key (C<value AS key>). A whatever-star will represent all columns.
 
 =head2 SQL::Abstract::Conditions
+
+This is a pair, a list of pairs, a hash or an C<Expression>. In the former three cases, the key (called left in the rest of this section) shall be an C<Identifier()> designating a column name, or an C<Expression>. The right hand side can be one of several types:
+
+=head3 Any:U
+
+This will check if the left expression is C<NULL>; C<:left(Any)> equals C<left IS NULL>.
+
+=head3 Pair
+
+This will use the key as operator to compare left against another value or expression. E.g. C<:left('<' => 42)> renders like C<< left < 42 >>. The following keys are known:
+
+=item C<=>
+=item C<!=>
+=item C<< <> >>
+=item C<< < >>
+=item C<< <= >>
+=item C<< > >>
+=item C<< >= >>
+=item C<like>
+=item C<not-like>
+=item C<distinct>
+=item C<not-distinct>
+=item C<||>
+=item C<< -> >>
+=item C<<< ->> >>>
+=item C<< #> >>
+=item C<<< #>> >>>
+=item C<*>
+=item C</>
+=item C<%>
+=item C<+>
+=item C<->
+=item C<&>
+=item C<|>
+=item C<<< << >>>
+=item C<<< >> >>>
+
+=head3 Hash
+
+This will be interpreted as a conjunction of the hash pairs. E.g. C<:left{ '>' => 3, '<' => 42 }> will render like C<< left > 3 AND left < 42 >>.
+
+=head3 Range
+
+This will check if a value is in a certain range. E.g. C<:left(1..42)> will render like C<left BETWEEN 1 AND 42>.
+
+=head3 Junction
+
+This will check against the values in the function. E.g. C<:left(1|2|4)> will render like C<left IN (1, 2, 4)>.
+
+=head3 Any
+
+If none of the above options match, the value will be compared to as is (as a placeholder). C<:left(2)> will render equivalent to C<left = 2>.
 
 =head2 SQL::Abstract::Assigns
 
 =head2 SQL::Abstract::OrderBy
 
-This takes a list (or an element) of identifiers or pairs. Each pair is 
-This sorts the rows by the listed columns. This is interpreted the same as C<$columns>, except C<*> isn't allowed, simple numbers may be interpreted as column numbers by your database, and it also allows one to use C<SQL::Abstract::Order::Modifier::Asc>/C<SQL::Abstract::Order::Desc> to specify the sorting order.
+This takes a list of things to sort by. Much like C<Expression::List> this accepts identifiers and expressions, but C<*> isn't allowed and pair values are interpreted as order modifier (e.g. C<:column<desc>>).
 
 =head1 Class SQL::Abstract
 
@@ -1945,7 +2169,7 @@ This sorts the rows by the listed columns. This is interpreted the same as C<$co
 This creates a new C<SQL::Abstract> object. It has one mandatory name argument, C<$placeholders>, which takes one of the following values:
 
 =begin item1
-SQL::Abstract::Placeholders::DBIish
+SQL::Abstract::Placeholders::DBI
 
 This will use DBI style C<(?, ?)> for placeholders
 =end item1
@@ -1956,7 +2180,7 @@ SQL::Abstract::Placeholders::Postgres
 This will use Postgres style C<($1, $2)> for placeholders.
 =end item1
 
-=head3 select(Source() $source, Expression::List() $columns?, Conditions() $where?, Bool :$distinct, Expression::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$locking)
+=head3 select(Source() $source, Expression::List() $columns?, Conditions() $where?, Bool :$distinct, Expression::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, Locking :$locking)
 
 This will generate a C<SELECT> query.
 
