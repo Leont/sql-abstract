@@ -1,3 +1,5 @@
+#! raku
+
 use Test;
 use SQL::Abstract;
 
@@ -9,7 +11,7 @@ my $result1 = result('SELECT * FROM foo', [1, 2, 3]);
 is $result1.sql, 'SELECT * FROM foo';
 is +$result1.arguments, 3;
 
-my $abstract = SQL::Abstract.new(:placeholders(SQL::Abstract::Placeholders::Postgres));
+my $abstract = SQL::Abstract.new(:placeholders<postgres>);
 
 my $select-simple1 = $abstract.select('my_table');
 
@@ -42,6 +44,14 @@ is-deeply $select-simple9, result('SELECT bar, baz FROM my_table WHERE foo = $1'
 my $select-simple10 = $abstract.select('my_table', <bar baz>, (:1foo, :1bar));
 is-deeply $select-simple10, result('SELECT bar, baz FROM my_table WHERE foo = $1 AND bar = $2', [1, 1]);
 
+my $select-simple11 = $abstract.select('my_table', 'bar', (:1foo, :1bar));
+is-deeply $select-simple11, result('SELECT bar FROM my_table WHERE foo = $1 AND bar = $2', [1, 1]);
+
+my $like = SQL::Abstract::Op::Like.new(:left($abstract.identifier('foo')), :right($abstract.value('foo%')), :escape($abstract.value('\\')));
+my $select-simple12 = $abstract.select('my_table', <bar baz>, $like);
+is-deeply $select-simple12, result('SELECT bar, baz FROM my_table WHERE foo LIKE $1 ESCAPE $2', ['foo%', '\\']);
+
+
 my $select-type1 = $abstract.select('my_table', <bar baz>, { :foo });
 is-deeply $select-type1, result('SELECT bar, baz FROM my_table WHERE foo = $1', [ True ]);
 
@@ -60,13 +70,15 @@ my $select-rename2 = $abstract.select((:my_table<quz>), <bar baz>, { :foo(Any) }
 is-deeply $select-rename2, result('SELECT bar, baz FROM quz AS my_table WHERE foo IS NULL', []);
 
 
-my $select-subselect1-select = $abstract.table('other_table').select(*, { :bar{ '>' => 3 } });
-my $select-subselect1 =  $abstract.select($select-subselect1-select.as(<new name>), <bar baz>, { :foo('<' => 4) });
+my $select-subselect1 = $abstract.select({ :query{ :source<other_table>, :where{ :bar{ '>' => 3 } } }, :as<new name> }, <bar baz>, { :foo('<' => 4) });
 is-deeply $select-subselect1, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new.name WHERE foo < $2', [3, 4]);
 
+my $select-subselect2 = $abstract.select(<new name> => SQL::Abstract::Select.create(:source<other_table>, :where{ :bar{ '>' => 3 } } ), <bar baz>, { :foo('<' => 4) });
+is-deeply $select-subselect2, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new.name WHERE foo < $2', [3, 4]);
 
-my $select-named1 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by<bar>);
-is-deeply $select-named1, result('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar', [1]);
+
+my $select-named1 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by<bar baz>);
+is-deeply $select-named1, result('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar, baz', [1]);
 
 my $select-named2 = $abstract.select('my_table', <bar baz>, { :1foo }, :5limit);
 is-deeply $select-named2, result('SELECT bar, baz FROM my_table WHERE foo = $1 LIMIT $2', [1, 5]);
@@ -83,29 +95,35 @@ is-deeply $select-named5, result('SELECT DISTINCT ON (bar) bar, baz FROM my_tabl
 my $select-named6 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by(:bar<desc>));
 is-deeply $select-named6, result('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar DESC', [1]);
 
+my $select-named7 = $abstract.select('my_table', <bar baz>, { :1foo }, :order-by({:column<bar>, :order<desc>, :nulls<last>}));
+is-deeply $select-named7, result('SELECT bar, baz FROM my_table WHERE foo = $1 ORDER BY bar DESC NULLS LAST', [1]);
 
-my $rank = $abstract.function('rank');
-my $select-window1 = $abstract.select('my_table', ( bar => $rank.over));
+my $select-window0 = $abstract.select('my_table', { :function<rank> });
+is-deeply $select-window0, result('SELECT rank() FROM my_table', []);
+
+my $select-window1 = $abstract.select('my_table', ( bar => { :function<rank>, :over{} }));
 is-deeply $select-window1, result('SELECT rank() OVER () AS bar FROM my_table', []);
 
-my $select-window2 = $abstract.select('my_table', ( bar => $rank.over(:partition-by<baz quz>)));
+my $select-window2 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :partition-by<baz quz> } }));
 is-deeply $select-window2, result('SELECT rank() OVER (PARTITION BY baz, quz) AS bar FROM my_table', []);
 
-my $select-window3 = $abstract.select('my_table', ( bar => $rank.over(:order-by<quz>)));
+my $select-window3 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :order-by<quz> } }));
 is-deeply $select-window3, result('SELECT rank() OVER (ORDER BY quz) AS bar FROM my_table', []);
 
-my $select-window4 = $abstract.select('my_table', ( bar => $rank.over(:partition-by<baz quz>, :order-by<quz>)));
+my $select-window4 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :partition-by<baz quz>, :order-by<quz> } }));
 is-deeply $select-window4, result('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz) AS bar FROM my_table', []);
 
-my $count = $abstract.function('count', 'foo', :filter{ :a('>'=> 3) }, :quantifier<distinct>, :order-by<bar>);
-my $select-window5 = $abstract.select('my_table', ( bar => $count.over()));
+my $select-window5 = $abstract.select('my_table', ( bar => { :function<count>, :arguments<foo>, :filter{ :a('>'=> 3) }, :quantifier<distinct>, :order-by<bar>, :over{} }));
 is-deeply $select-window5, result('SELECT count(DISTINCT foo ORDER BY bar) FILTER (WHERE a > $1) OVER () AS bar FROM my_table', [3]);
 
-my $select-window6 = $abstract.select('my_table', ( bar => $rank.over(:partition-by<baz quz>, :order-by<quz>, :frame{ :from<preceding> })));
+my $select-window6 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :partition-by<baz quz>, :order-by<quz>, :frame{ :from<preceding> } } }));
 is-deeply $select-window6, result('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz ROWS UNBOUNDED PRECEDING) AS bar FROM my_table', []);
 
-my $select-window7 = $abstract.select('my_table', ( bar => $rank.over(:partition-by<baz quz>, :order-by<quz>, :frame{ :from(:1preceding), :to(:2following), :exclude<group>, :mode<range> })));
+my $select-window7 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :partition-by<baz quz>, :order-by<quz>, :frame{ :from(:1preceding), :to(:2following), :exclude<group>, :mode<range> } } }));
 is-deeply $select-window7, result('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz RANGE BETWEEN $1 PRECEDING AND $2 FOLLOWING EXCLUDE GROUP) AS bar FROM my_table', [1, 2]);
+
+my $select-window8 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :existing<w>} }), :windows(:w{:partition-by<baz quz>}));
+is-deeply $select-window8, result('SELECT rank() OVER w AS bar FROM my_table WINDOW w AS (PARTITION BY baz, quz)', []);
 
 
 my $select-funcsource1 = $abstract.select($abstract.function('some_function').as('ranking', <bar baz>), *);
@@ -138,6 +156,9 @@ is-deeply $select-junction6, result('SELECT bar, baz FROM my_table WHERE NOT (fo
 my $select-junction7 = $abstract.select('my_table', <bar baz>, { :foo(none(1..42, Empty)) });
 is-deeply $select-junction7, result('SELECT bar, baz FROM my_table WHERE foo NOT BETWEEN $1 AND $2', [1, 42]);
 
+my $select-junction8 = $abstract.select('my_table', <bar baz>, { :foo(1^2^4) });
+is-deeply $select-junction8, result('SELECT bar, baz FROM my_table WHERE CAST(foo = $1 AS INTEGER) + CAST(foo = $2 AS INTEGER) + CAST(foo = $3 AS INTEGER) = 1', [1, 2, 4]);
+
 
 my $select-groupby1 = $abstract.select('my_table', <bar baz>, { :1foo }, :group-by<bar>);
 is-deeply $select-groupby1, result('SELECT bar, baz FROM my_table WHERE foo = $1 GROUP BY bar', [1]);
@@ -157,19 +178,17 @@ my $select-precedence1 = $abstract.select('my_table', <bar baz>, $e);
 is-deeply $select-precedence1, result('SELECT bar, baz FROM my_table WHERE $1 < ($2 AND $3)', [1, 1, 2]);
 
 
-my $select-cte1 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => $abstract.table('other_table') ]);
-is-deeply $select-cte1, result('WITH my_table AS (TABLE other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
+my $select-cte1 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => 'other_table' ]);
+is-deeply $select-cte1, result('WITH my_table AS (SELECT * FROM other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
 
-my $select-cte2-other = $abstract.table('other_table').select;
-my $select-cte2 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => $select-cte2-other ]);
+my $select-cte2 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => { :source<other_table> } ]);
 is-deeply $select-cte2, result('WITH my_table AS (SELECT * FROM other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
 
 
-my $select-union1-other = $abstract.table('other_table').select;
-my $select-union1 = $abstract.select('my_table', <bar baz>, { :1foo }, :compound(union => $select-union1-other), :order-by<bar>);
+my $select-union1 = $abstract.select('my_table', <bar baz>, { :1foo }, :compound(union => { :source<other_table> }), :order-by<bar>);
 is-deeply $select-union1, result('SELECT bar, baz FROM my_table WHERE foo = $1 UNION SELECT * FROM other_table ORDER BY bar', [1]);
 
-my $select-union2 = $abstract.select('my_table', <bar baz>, { :1foo }, :compound(union-all => $select-union1-other), :order-by<bar>);
+my $select-union2 = $abstract.select('my_table', <bar baz>, { :1foo }, :compound(union-all => { :source<other_table> }), :order-by<bar>);
 is-deeply $select-union2, result('SELECT bar, baz FROM my_table WHERE foo = $1 UNION ALL SELECT * FROM other_table ORDER BY bar', [1]);
 
 
@@ -179,14 +198,22 @@ is-deeply $select-join1, result('SELECT bar, baz FROM my_table INNER JOIN other_
 my $select-join2 = $abstract.select({ :left<my_table>, :right<other_table>, :on{ 'my_table.baz' => <other_table baz_id>} }, <bar baz>, { :1foo});
 is-deeply $select-join2, result('SELECT bar, baz FROM my_table INNER JOIN other_table ON my_table.baz = other_table.baz_id WHERE foo = $1', [1]);
 
+my $select-join3 = $abstract.select({ :left<my_table>, :right<other_table>, :natural, :type<left> }, <bar baz>, { :1foo});
+is-deeply $select-join3, result('SELECT bar, baz FROM my_table NATURAL LEFT JOIN other_table WHERE foo = $1', [1]);
 
-my $select-sub1-any = SQL::Abstract::Op::In::Query.new(:left($abstract.identifier('foo')), :query($abstract.table('other_table').select));
+my $select-join4 = $abstract.select({ :left<my_table>, :right<other_table>, :cross }, <bar baz>, { :1foo});
+is-deeply $select-join4, result('SELECT bar, baz FROM my_table CROSS JOIN other_table WHERE foo = $1', [1]);
+
+
+my $select-other = SQL::Abstract::Select.create(:source<other_table>);
+my $select-sub1-any = SQL::Abstract::Op::In::Query.new(:left($abstract.identifier('foo')), :query($select-other));
 my $select-sub1 = $abstract.select('my_table', <bar baz>, $select-sub1-any);
 is-deeply $select-sub1, result('SELECT bar, baz FROM my_table WHERE foo IN (SELECT * FROM other_table)', []);
 
-my $select-sub2-any = SQL::Abstract::Op::Exists.new(:left($abstract.identifier('foo')), :query($abstract.table('other_table').select));
+my $select-sub2-any = SQL::Abstract::Op::Exists.new(:left($abstract.identifier('foo')), :query($select-other));
 my $select-sub2 = $abstract.select('my_table', <bar baz>, $select-sub2-any);
 is-deeply $select-sub2, result('SELECT bar, baz FROM my_table WHERE foo EXISTS (SELECT * FROM other_table)', []);
+
 
 
 my $insert1 = $abstract.insert('my_table', { bar => 1, baz => 43 });
@@ -204,10 +231,10 @@ is-deeply $insert4, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) RETU
 my $insert5 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict({ :target(:columns<bar>), :do{ bar => 2 } }));
 is-deeply $insert5, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT (bar) DO UPDATE SET bar = $3', [1, 42, 2]);
 
-my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict($abstract.conflict(:do<nothing>)));
+my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict({ :do<nothing> }));
 is-deeply $insert6, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT DO NOTHING', [1, 42]);
 
-my $insert7-select = $abstract.table('other_table').select(<bar baz>, { :foo('>' => 3) });
+my $insert7-select = SQL::Abstract::Select.create(:source<other_table>, :columns<bar baz>, :where{ :foo('>' => 3) });
 my $insert7 =  $abstract.insert('my_table', <bar baz>, $insert7-select);
 is-deeply $insert7, result('INSERT INTO my_table (bar, baz) SELECT bar, baz FROM other_table WHERE foo > $1', [3]);
 
@@ -239,11 +266,12 @@ is-deeply $update5, result('UPDATE my_table SET bar = bar + $1, baz = $2 WHERE q
 my $update6 = $abstract.update('my_table', { bar => 1, baz => 42 }, { quz => 13 }, :from<other>);
 is-deeply $update6, result('UPDATE my_table SET bar = $1, baz = $2 FROM other WHERE quz = $3', [1, 42, 13]);
 
-my $update7-select = $abstract.table('other_table').select(*, { :bar{ '>' => 3 } });
-my $update7 = $abstract.update('my_table', <bar baz>, $update7-select, { quz => 13 });
+my $update7-columns = $abstract.identifiers(<bar baz>);
+my $update7-select = SQL::Abstract::Select.create(:source<other_table>, :where{ :bar{ '>' => 3 } });
+my $update7 = $abstract.update('my_table', :{ $update7-columns => $update7-select }, { quz => 13 });
 is-deeply $update7, result('UPDATE my_table SET (bar, baz) = (SELECT * FROM other_table WHERE bar > $1) WHERE quz = $2', [3, 13]);
 
-my $update8 = $abstract.update('my_table', <bar baz>, SQL::Abstract::Row.COERCE([1, 2]), { quz => 13 });
+my $update8 = $abstract.update('my_table', :{ $update7-columns => SQL::Abstract::Row.COERCE([1, 2]) }, { quz => 13 });
 is-deeply $update8, result('UPDATE my_table SET (bar, baz) = ($1, $2) WHERE quz = $3', [1, 2, 13]);
 
 my $update9 = $abstract.update('my_table', { bar => 1, baz => 42 }, :from<quz>);
@@ -260,37 +288,54 @@ is-deeply $delete2, result('DELETE FROM my_table WHERE foo < $1 RETURNING baz', 
 my $delete3 = $abstract.delete('my_table', { :foo('<' => 3) }, :using<baz>);
 is-deeply $delete3, result('DELETE FROM my_table USING baz WHERE foo < $1', [3]);
 
+my $values1 = $abstract.values([[1, 2],], :1limit);
+is-deeply $values1, result('VALUES ($1, $2) LIMIT $3', [1, 2, 1]);
+
 
 
 my $prepared1 = result('', [1, 2, 3]);
 is-deeply $prepared1.resolve, (1, 2, 3);
+is-deeply $prepared1.type-hints, (Int, Int, Int);
 
 my $prepared2 = result('', [1, 2, SQL::Abstract::Delayed.new('foo')]);
 dies-ok { $prepared2.resolve };
+is-deeply $prepared2.type-hints, (Int, Int, Any);
+is-deeply $prepared2.resolve({ :3foo }), (1, 2, 3);
+is-deeply $prepared2.identifiers, ('foo',);
 
-my $prepared3 = result('', [1, 2, SQL::Abstract::Delayed.new('foo')]);
-is-deeply $prepared3.resolve({ :3foo }), (1, 2, 3);
+my $prepared3 = result('', [1, 2, SQL::Abstract::Delayed.new('foo', :type(Int))]);
+is-deeply $prepared3.type-hints, (Int, Int, Int);
 
 my $prepared4 = result('', [1, 2, SQL::Abstract::Delayed.new('foo', :default(3))]);
+is-deeply $prepared4.type-hints, (Int, Int, Int);
 is-deeply $prepared4.resolve, (1, 2, 3);
 is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
 
 
 
-my SQL::Abstract::Conditions(Any) $conditional1 = :1id;
-isa-ok $conditional1.expression, Op::Equals;
+my $conditional1 = SQL::Abstract::Conditions.COERCE((:1id));
+isa-ok $conditional1.expression, SQL::Abstract::Op::Equals;
 is $conditional1.expression.left, SQL::Abstract::Identifier.new('id');
 cmp-ok $conditional1.expression.left, '===', SQL::Abstract::Identifier.new('id');
 is-deeply $conditional1.expression.right, $abstract.value(1);
 
-my SQL::Abstract::Conditions(Any) $conditional2 = { :other(1|2) };
-isa-ok $conditional2.expression, Op::In;
+my $conditional2 = SQL::Abstract::Conditions.COERCE((:other(1|2)));
+isa-ok $conditional2.expression, SQL::Abstract::Op::In;
 is-deeply $conditional2.expression.elements[0], $abstract.value(1);
 is-deeply $conditional2.expression.elements[1], $abstract.value(2);
 
 my $conditional3 = $conditional1.merge($conditional2);
-isa-ok $conditional3.expression, Op::And;
-isa-ok $conditional3.expression.elements[0], Op::Equals;
-isa-ok $conditional3.expression.elements[1], Op::In;
+isa-ok $conditional3.expression, SQL::Abstract::Op::And;
+isa-ok $conditional3.expression.elements[0], SQL::Abstract::Op::Equals;
+isa-ok $conditional3.expression.elements[1], SQL::Abstract::Op::In;
+
+my $conditional4 = SQL::Abstract::Join::Conditions.from-using($abstract.table('left'), $abstract.table('right'), $abstract.identifiers(<shared shared2>));
+isa-ok $conditional4.expression, SQL::Abstract::Op::And;
+isa-ok $conditional4.expression.elements[0], SQL::Abstract::Op::Equals;
+is-deeply $conditional4.expression.elements[0].left, $abstract.identifier('left.shared');
+is-deeply $conditional4.expression.elements[0].right, $abstract.identifier('right.shared');
+isa-ok $conditional4.expression.elements[1], SQL::Abstract::Op::Equals;
+is-deeply $conditional4.expression.elements[1].left, $abstract.identifier('left.shared2');
+is-deeply $conditional4.expression.elements[1].right, $abstract.identifier('right.shared2');
 
 done-testing;
