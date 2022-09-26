@@ -42,13 +42,13 @@ SQL::Abstract::Identifier
 
 This represents an identifier (typically a table name or column name, or an alias for such). It can be created from either:
 
-    * Str
+  * Str
 
-      This will interpret a string (e.g. `"foo"` or `"foo.bar"`) as an identifier.
+    This will interpret a string (e.g. `"foo"` or `"foo.bar"`) as an identifier.
 
-    * List
+  * List
 
-      This will interpret the elements of the list representing the components of the name. E.g. `<bar baz> ` is equivalent to `"bar.baz" `.
+    This will interpret the elements of the list representing the components of the name. E.g. `<bar baz> ` is equivalent to `"bar.baz" `.
 
 SQL::Abstract::Identifiers
 --------------------------
@@ -60,37 +60,37 @@ SQL::Abstract::Source
 
 A source is source of data, usually a table or a join. If not passed as a `Source` object it will upconvert from the following types:
 
-    * Str
+  * Str
 
-      This represents the named table, e.g. `"my_table"`.
+    This represents the named table, e.g. `"my_table"`.
 
-    * List
+  * List
 
-      This represents the named table, with the elements of the list representing the components of the table name. E.g. `<bar baz> ` is equivalent to `"bar.baz" `.
+    This represents the named table, with the elements of the list representing the components of the table name. E.g. `<bar baz> ` is equivalent to `"bar.baz" `.
 
-    * Pair (Str => Identifier(Cool))
+  * Pair (Str => Identifier(Cool))
 
-      This will rename the table in the value to the name in the key.
+    This will rename the table in the value to the name in the key.
 
-    * Pair (Str => Select(Map))
+  * Pair (Str => Select(Map))
 
-      This will use the result of a subquery as if it's a table.
+    This will use the result of a subquery as if it's a table.
 
-    * Hash
+  * Hash
 
-      This will join two `Source`s, named `left` and `right`, it requires one of the following entries to join them on:
+    This will join two `Source`s, named `left` and `right`, it requires one of the following entries to join them on:
 
-            * Join::Conditions() :$on
+          * Join::Conditions() :$on
 
-            * Identifiers() :$conditions
+          * Identifiers() :$conditions
 
-            * Bool :$natural
+          * Bool :$natural
 
-            * Bool :$cross
+          * Bool :$cross
 
-      e.g. `{ :left<artist>, :right<album>, :using<album_id> } ` or `{ :left<artist>, :right<album>, :on{'artist.id' => 'album.artist_id'} } `
+    e.g. `{ :left<artist>, :right<album>, :using<album_id> } ` or `{ :left<artist>, :right<album>, :on{'artist.id' => 'album.artist_id'} } `
 
-      The first three joiners take an optional `:$type` argument that can be any of `"inner"`/`Join::Type::Inner`, `"left"`/`Join::Type::Left`, `"right"`/`Join::Type::Right` or `"full"`/`Join::Type::Full`.
+    The first three joiners take an optional `:$type` argument that can be any of `"inner"`/`Join::Type::Inner`, `"left"`/`Join::Type::Left`, `"right"`/`Join::Type::Right` or `"full"`/`Join::Type::Full`.
 
 SQL::Abstract::Table does SQL::Abstract::Source
 -----------------------------------------------

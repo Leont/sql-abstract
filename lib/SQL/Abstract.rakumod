@@ -1935,17 +1935,17 @@ SQL::Abstract uses various helper types:
 
 This represents an identifier (typically a table name or column name, or an alias for such). It can be created from either:
 
-=begin item2
+=begin item1
 Str
 
 This will interpret a string (e.g. C<"foo"> or C<"foo.bar">) as an identifier.
-=end item2
+=end item1
 
-=begin item2
+=begin item1
 List
 
 This will interpret the elements of the list representing the components of the name. E.g. C<< <bar baz> >> is equivalent to C< "bar.baz" >.
-=end item2
+=end item1
 
 =head2 SQL::Abstract::Identifiers
 
@@ -1955,31 +1955,31 @@ This takes either a list of C<Identifier()>, or a single C<Identifier()>. Note t
 
 A source is source of data, usually a table or a join. If not passed as a C<Source> object it will upconvert from the following types:
 
-=begin item2
+=begin item1
 Str
 
 This represents the named table, e.g. C<"my_table">.
-=end item2
+=end item1
 
-=begin item2
+=begin item1
 List
 
 This represents the named table, with the elements of the list representing the components of the table name. E.g. C<< <bar baz> >> is equivalent to C< "bar.baz" >.
-=end item2
+=end item1
 
-=begin item2
+=begin item1
 Pair (Str => Identifier(Cool))
 
 This will rename the table in the value to the name in the key.
-=end item2
+=end item1
 
-=begin item2
+=begin item1
 Pair (Str => Select(Map))
 
 This will use the result of a subquery as if it's a table.
-=end item2
+=end item1
 
-=begin item2
+=begin item1
 Hash
 
 This will join two `Source`s, named C<left> and C<right>, it requires one of the following entries to join them on:
@@ -1993,7 +1993,7 @@ e.g. C<< { :left<artist>, :right<album>, :using<album_id> } >> or C<< { :left<ar
 
 The first three joiners take an optional C<:$type> argument that can be any of C<"inner">/C<Join::Type::Inner>, C<"left">/C<Join::Type::Left>, C<"right">/C<Join::Type::Right> or C<"full">/C<Join::Type::Full>.
 
-=end item2
+=end item1
 
 =head2 SQL::Abstract::Table does SQL::Abstract::Source
 
