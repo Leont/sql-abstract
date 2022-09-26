@@ -1989,7 +1989,7 @@ This will join two `Source`s, named C<left> and C<right>, it requires one of the
 =item3 Bool :$natural
 =item3 Bool :$cross
 
-e.g. C<< { :left<artist>, :right<album>, :using<album_id>, :type<left> } >> or C<< { :left<artist>, :right<album>, :on{'artist.id' => 'album.artist_id'} } >>
+e.g. C<< { :left<artist>, :right<album>, :using<album_id> } >> or C<< { :left<artist>, :right<album>, :on{'artist.id' => 'album.artist_id'} } >>
 
 The first three joiners take an optional C<:$type> argument that can be any of C<"inner">/C<Join::Type::Inner>, C<"left">/C<Join::Type::Left>, C<"right">/C<Join::Type::Right> or C<"full">/C<Join::Type::Full>.
 
@@ -2049,13 +2049,9 @@ This will use the key as operator to compare left against another value or expre
 
 This will check if a value is in a certain range. E.g. C<:left(1..42)> will render like C<left BETWEEN 1 AND 42>.
 
-=head3 List
-
-This will be interpreted as a conjunction of the values. E.g. C<:left('!=' => 13, 2..42)> will render like C<< left <> 13 AND left BETWEEN 2 AND 42 >>.
-
 =head3 Map
 
-This will be interpreted as a conjunction of the hash pairs. E.g. C<:left{ '>' => 3, '<' => 42 }> will render like C<< left > 3 AND left < 42 >>.
+This will be interpreted as a conjunction of the hash pairs. E.g. C<< :left{ '>' => 3, '<' => 42 } >> will render like C<< left > 3 AND left < 42 >>.
 
 =head3 Junction
 
@@ -2107,7 +2103,8 @@ my $join = { :left<books>, :right<authors>, :using<author_id> };
 my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost{ '<' => 10 } });
 # SELECT books.name, authors.name FROM books INNER JOIN authors USING (author_id) WHERE cost < 10
 
-$abstract.select('artists', [ 'name', :sum{ :function<count>, :arguments(*) } ], { :name(:like('A%')) }, :group-by<name>, :order-by(:sum<desc>));
+my @columns = [ 'name', :sum{ :function<count>, :arguments(*) } ];
+$abstract.select('artists', @columns, { :name(:like('A%')) }, :group-by<name>, :order-by(:sum<desc>));
 # SELECT name, COUNT(*) as sum FROM artists WHERE name LIKE 'A%' GROUP BY name ORDER BY sum DESC
 
 =end code
