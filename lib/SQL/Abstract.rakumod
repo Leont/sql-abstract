@@ -64,10 +64,13 @@ class Value::Null    does Constant['NULL']    {}
 my multi expand-expression(Expression $expression) {
 	$expression;
 }
-my multi expand-expression(Placeholder(Any) $value) {
-	$value;
+my multi expand-expression(Any:D $value) {
+	Placeholder.new(:$value);
 }
-my multi expand-expression(Literal(Capture) $literal) {
+my multi expand-expression(Any:U) {
+	Value::Null.new;
+}
+my multi expand-expression(Literal(Capture:D) $literal) {
 	$literal;
 }
 
