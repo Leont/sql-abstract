@@ -126,7 +126,7 @@ my $select-window8 = $abstract.select('my_table', ( bar => { :function<rank>, :o
 is-deeply $select-window8, result('SELECT rank() OVER w AS bar FROM my_table WINDOW w AS (PARTITION BY baz, quz)', []);
 
 
-my $select-funcsource1 = $abstract.select({ :function{ :function<some_function> }, :alias<ranking>, :columns<bar baz> }, *);
+my $select-funcsource1 = $abstract.select({ :function{ :name<some_function> }, :alias<ranking>, :columns<bar baz> }, *);
 is-deeply $select-funcsource1, result('SELECT * FROM (some_function()) AS ranking (bar, baz)', []);
 
 

@@ -167,10 +167,10 @@ class Column::List does Value::List {
 		Identifier.new('*');
 	}
 	my multi to-column(Map $map (Str :$function!, :%over!, *%args)) {
-		Function.COERCE({ :$function, |%args }).over(|%over);
+		Function.COERCE({ :name($function), |%args }).over(|%over);
 	}
 	my multi to-column(Map $map (Str :$function!, *%args)) {
-		Function.COERCE($map);
+		Function.COERCE({ :name($function), |%args });
 	}
 
 	multi method COERCE(Any $column) {
@@ -660,14 +660,14 @@ package Window {
 class Source::Function { ... }
 
 class Function does Expression {
-	has Str:D $.function is required;
+	has Str:D $.name is required;
 	has Quantifier $.quantifier;
 	has Value::List:D $.arguments is required;
 	has OrderBy $.order-by;
 	has Conditions $.filter;
 
-	method COERCE(Map (Str :$function!, Column::List:D(Any:D) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
-		Function.new(:$function, :$arguments, :$filter, :$quantifier, :$order-by);
+	method COERCE(Map (Str :$name!, Column::List:D(Any:D) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
+		Function.new(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
 	}
 
 	method precedence() {
@@ -1081,8 +1081,8 @@ role Source {
 	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Function:D :$value)) {
 		Source::Function.new(:function($value), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Map:D :$value ( :function($)!, *% ))) {
-		my Function(Map) $function = $value;
+	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Map:D :$value ( :function($name)!, *%args ))) {
+		my Function(Map) $function = { :$name, |%args };
 		Source::Function.new(:$function, :alias($key));
 	}
 	
@@ -1420,7 +1420,7 @@ class Renderer::SQL does Renderer {
 		@expressions.append: self.render-column-expressions($placeholders, $function.arguments);
 		@expressions.append: self.render-order-by($placeholders, $function.order-by);
 		my $expression = @expressions.join(' ');
-		my @result = "{ $function.function() }($expression)";
+		my @result = "{ $function.name() }($expression)";
 		@result.push: 'FILTER', parenthesize-list(self.render-conditions($placeholders, $function.filter, 'WHERE')) with $function.filter;
 		@result.join(' ');
 	}
@@ -1868,8 +1868,8 @@ method not(Expression $expression) {
 	Op::Not.new($expression)
 }
 
-method function(Str $function, Column::List:D(Any:D) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) {
-	Function.new(:$function, :$arguments, :$filter, :$quantifier, :$order-by);
+method function(Str $name, Column::List:D(Any:D) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) {
+	Function.new(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
 }
 
 method value(Any $value) {
