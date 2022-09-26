@@ -70,8 +70,8 @@ my $select-rename2 = $abstract.select((:my_table<quz>), <bar baz>, { :foo(Any) }
 is-deeply $select-rename2, result('SELECT bar, baz FROM quz AS my_table WHERE foo IS NULL', []);
 
 
-my $select-subselect1 = $abstract.select({ :query{ :source<other_table>, :where{ :bar{ '>' => 3 } } }, :as<new name> }, <bar baz>, { :foo('<' => 4) });
-is-deeply $select-subselect1, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new.name WHERE foo < $2', [3, 4]);
+my $select-subselect1 = $abstract.select({ :query{ :source<other_table>, :where{ :bar{ '>' => 3 } } }, :alias<new_name> }, <bar baz>, { :foo('<' => 4) });
+is-deeply $select-subselect1, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new_name WHERE foo < $2', [3, 4]);
 
 my $select-subselect2 = $abstract.select(<new name> => SQL::Abstract::Select.create(:source<other_table>, :where{ :bar{ '>' => 3 } } ), <bar baz>, { :foo('<' => 4) });
 is-deeply $select-subselect2, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new.name WHERE foo < $2', [3, 4]);
@@ -126,7 +126,7 @@ my $select-window8 = $abstract.select('my_table', ( bar => { :function<rank>, :o
 is-deeply $select-window8, result('SELECT rank() OVER w AS bar FROM my_table WINDOW w AS (PARTITION BY baz, quz)', []);
 
 
-my $select-funcsource1 = $abstract.select($abstract.function('some_function').as('ranking', <bar baz>), *);
+my $select-funcsource1 = $abstract.select({ :function{ :function<some_function> }, :alias<ranking>, :columns<bar baz> }, *);
 is-deeply $select-funcsource1, result('SELECT * FROM (some_function()) AS ranking (bar, baz)', []);
 
 
@@ -234,8 +234,7 @@ is-deeply $insert5, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON C
 my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict({ :do<nothing> }));
 is-deeply $insert6, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT DO NOTHING', [1, 42]);
 
-my $insert7-select = SQL::Abstract::Select.create(:source<other_table>, :columns<bar baz>, :where{ :foo('>' => 3) });
-my $insert7 =  $abstract.insert('my_table', <bar baz>, $insert7-select);
+my $insert7 =  $abstract.insert('my_table', <bar baz>, { :source<other_table>, :columns<bar baz>, :where{ :foo('>' => 3) } });
 is-deeply $insert7, result('INSERT INTO my_table (bar, baz) SELECT bar, baz FROM other_table WHERE foo > $1', [3]);
 
 my $insert8 = $abstract.insert((:alias<my_table>), { bar => 1, baz => 43 });
@@ -246,6 +245,9 @@ is-deeply $insert9, result('INSERT INTO my_table DEFAULT VALUES', []);
 
 my $insert10 = $abstract.insert('my_table', { bar => 1, baz => 43 }, :overriding<system>);
 is-deeply $insert10, result('INSERT INTO my_table (bar, baz) OVERRIDING SYSTEM VALUE VALUES ($1, $2)', [1, 43]);
+
+my $insert11 = $abstract.insert('my_table', List, [ [ 1, 42 ], ]);
+is-deeply $insert11, result('INSERT INTO my_table VALUES ($1, $2)', [1, 42]);
 
 
 my $update1 = $abstract.update('my_table', { bar => 1, baz => 42 });
@@ -288,6 +290,10 @@ is-deeply $delete2, result('DELETE FROM my_table WHERE foo < $1 RETURNING baz', 
 my $delete3 = $abstract.delete('my_table', { :foo('<' => 3) }, :using<baz>);
 is-deeply $delete3, result('DELETE FROM my_table USING baz WHERE foo < $1', [3]);
 
+my $delete4 = $abstract.delete('my_table', \'CURRENT OF cursor_name', :using<baz>);
+is-deeply $delete4, result('DELETE FROM my_table USING baz WHERE CURRENT OF cursor_name', []);
+
+
 my $values1 = $abstract.values([[1, 2],], :1limit);
 is-deeply $values1, result('VALUES ($1, $2) LIMIT $3', [1, 2, 1]);
 
@@ -297,16 +303,16 @@ my $prepared1 = result('', [1, 2, 3]);
 is-deeply $prepared1.resolve, (1, 2, 3);
 is-deeply $prepared1.type-hints, (Int, Int, Int);
 
-my $prepared2 = result('', [1, 2, SQL::Abstract::Delayed.new('foo')]);
+my $prepared2 = result('', [1, 2, $abstract.delay('foo')]);
 dies-ok { $prepared2.resolve };
 is-deeply $prepared2.type-hints, (Int, Int, Any);
 is-deeply $prepared2.resolve({ :3foo }), (1, 2, 3);
 is-deeply $prepared2.identifiers, ('foo',);
 
-my $prepared3 = result('', [1, 2, SQL::Abstract::Delayed.new('foo', :type(Int))]);
+my $prepared3 = result('', [1, 2, $abstract.delay('foo', :type(Int))]);
 is-deeply $prepared3.type-hints, (Int, Int, Int);
 
-my $prepared4 = result('', [1, 2, SQL::Abstract::Delayed.new('foo', :default(3))]);
+my $prepared4 = result('', [1, 2, $abstract.delay('foo', 3)]);
 is-deeply $prepared4.type-hints, (Int, Int, Int);
 is-deeply $prepared4.resolve, (1, 2, 3);
 is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
@@ -315,12 +321,13 @@ is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
 
 my $conditional1 = SQL::Abstract::Conditions.COERCE((:1id));
 isa-ok $conditional1.expression, SQL::Abstract::Op::Equals;
-is $conditional1.expression.left, SQL::Abstract::Identifier.new('id');
-cmp-ok $conditional1.expression.left, '===', SQL::Abstract::Identifier.new('id');
+is $conditional1.expression.left, $abstract.identifier('id');
+cmp-ok $conditional1.expression.left, '===', $abstract.identifier('id');
 is-deeply $conditional1.expression.right, $abstract.value(1);
 
 my $conditional2 = SQL::Abstract::Conditions.COERCE((:other(1|2)));
 isa-ok $conditional2.expression, SQL::Abstract::Op::In;
+is-deeply $conditional2.expression.left, $abstract.identifier('other');
 is-deeply $conditional2.expression.elements[0], $abstract.value(1);
 is-deeply $conditional2.expression.elements[1], $abstract.value(2);
 

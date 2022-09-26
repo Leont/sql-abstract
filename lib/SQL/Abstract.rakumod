@@ -104,10 +104,7 @@ class Expression::Renamed does Expression {
 	has Identifier:D $.alias is required;
 	has Expression:D $.source is required;
 
-	multi method COERCE(Pair (Identifier(Cool) :key($alias), Expression :value($source))) {
-		self.new(:$alias, :$source);
-	}
-	multi method COERCE(Pair (Identifier(Cool) :key($alias), Identifier(Cool) :value($source))) {
+	method COERCE(Pair (Identifier(Cool) :key($alias), Expression :value($source))) {
 		self.new(:$alias, :$source);
 	}
 
@@ -135,6 +132,9 @@ class Identifiers does Value::List {
 	multi method COERCE(@list) {
 		my Identifier(Cool) @elements = @list;
 		self.new(:@elements);
+	}
+	multi method COERCE(List:U $list) {
+		Identifiers;
 	}
 
 	multi method merge(Identifiers $other) {
@@ -445,8 +445,7 @@ class Op::Case does Expression {
 role Conditional {
 	has Expression:D $.expression is required;
 
-	proto method new(|) { * }
-	multi method new(:@expressions) {
+	method new(:@expressions) {
 		my $expression = Op::And.pack(@expressions);
 		self.bless(:$expression);
 	}
@@ -544,8 +543,8 @@ class Conditions does Conditional {
 	multi method COERCE(%hash) {
 		samewith(%hash.sort);
 	}
-	multi method COERCE(Literal(Capture) $capture) {
-		samewith($capture);
+	multi method COERCE(Literal(Capture) $expression) {
+		self.bless(:$expression);
 	}
 }
 
@@ -667,7 +666,7 @@ class Function does Expression {
 	has OrderBy $.order-by;
 	has Conditions $.filter;
 
-	method COERCE(Map (Str :$function, Column::List:D(Any:D) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
+	method COERCE(Map (Str :$function!, Column::List:D(Any:D) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
 		Function.new(:$function, :$arguments, :$filter, :$quantifier, :$order-by);
 	}
 
@@ -969,27 +968,23 @@ class Conflict::Target::Constraint { ... }
 
 role Conflict::Target {
 	multi method COERCE(Pair (:$key where 'columns', Identifiers:D(Any:D) :$value)) {
-		Conflict::Target::Columns.new($value);
+		Conflict::Target::Columns.new(:columns($value));
+	}
+	multi method COERCE(Pair (:$key where 'columns', Map :value($) (Identifiers:D(Any:D) :$columns, Conditions(Any) :$where))) {
+		Conflict::Target::Columns.new(:$columns, :$where);
 	}
 	multi method COERCE(Pair (:$key where 'constraint', Identifier:D(Cool:D) :$value)) {
-		Conflict::Target::Constraint.new($value);
+		Conflict::Target::Constraint.new(:constraint($value));
 	}
 }
 
 class Conflict::Target::Columns does Conflict::Target {
 	has Identifiers:D $.columns is required;
 	has Conditions    $.where;
-
-	method new(Identifiers:D $columns, Conditions $where?) {
-		self.bless(:$columns, :$where);
-	}
 }
 
 class Conflict::Target::Constraint does Conflict::Target {
 	has Identifier:D $.constraint is required;
-	method new(Identifier:D $constraint) {
-		self.bless(:$constraint);
-	}
 }
 
 class Conflict::Nothing { ... }
@@ -1003,16 +998,15 @@ role Conflict {
 		Conflict::Nothing.new;
 	}
 	multi method COERCE(Map (Conflict::Target(Pair) :$target?, Str:D :$do! where 'nothing')) {
-		Conflict::Nothing.bless(:$target);
+		Conflict::Nothing.new(:$target);
 	}
-	multi method COERCE(Map (Conflict::Target(Pair) :$target!, Assigns:D(Any:D) :$do!)) {
+	multi method COERCE(Map (Conflict::Target:D(Pair) :$target!, Assigns:D(Any:D) :$do!, Conditions(Any) :$where)) {
 		my @assignments = $do.assignments;
-		Conflict::Update.bless(:$target, :@assignments);
+		Conflict::Update.new(:$target, :@assignments, :$where);
 	}
 }
 
-class Conflict::Nothing does Conflict {
-}
+class Conflict::Nothing does Conflict {}
 
 class Conflict::Update does Conflict {
 	has Op::Assign @.assignments;
@@ -1020,26 +1014,26 @@ class Conflict::Update does Conflict {
 }
 
 role Insert does Query::Common {
-	has Table:D          $.target is required;
-	has Identifiers      $.fields;
-	has Overriding       $.overriding;
-	has Conflict         $.conflict;
-	has Column::List     $.returning;
+	has Table:D      $.target is required;
+	has Identifiers  $.columns;
+	has Overriding   $.overriding;
+	has Conflict     $.conflict;
+	has Column::List $.returning;
 }
 
 class Insert::Values does Insert {
 	has Rows:D $.rows is required;
 
-	method create(Table(Any) :$target, Identifiers(Any) :$fields, Rows:D(List:D) :$rows, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-		Insert::Values.new(:$target, :$fields, :$rows, :$overriding, :$conflict, :$returning);
+	method create(Table(Any) :$target, Identifiers(Any) :$columns, Rows:D(List:D) :$rows, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+		Insert::Values.new(:$target, :$columns, :$rows, :$overriding, :$conflict, :$returning);
 	}
 }
 
 class Insert::Select does Insert {
 	has Select:D $.select is required;
 
-	method create(Table(Any) :$target, Identifiers(Any) :$fields, Select(Map) :$select, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-		Insert::Select.new(:$target, :$fields, :$select, :$overriding, :$conflict, :$returning);
+	method create(Table(Any) :$target, Identifiers(Any) :$columns, Select(Map) :$select, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+		Insert::Select.new(:$target, :$columns, :$select, :$overriding, :$conflict, :$returning);
 	}
 }
 
@@ -1050,10 +1044,10 @@ class Insert::Defaults does Insert {
 }
 
 class Delete does Query::Common {
-	has Table:D          $.target is required;
-	has Source           $.using;
-	has Conditions       $.where;
-	has Column::List     $.returning;
+	has Table:D      $.target is required;
+	has Source       $.using;
+	has Conditions   $.where;
+	has Column::List $.returning;
 
 	method create(Table(Cool) :$target!, Source(Any) :$using, Conditions(Any) :$where, Column::List(Any) :$returning) {
 		Delete.new(:$target, :$where, :$using :$returning);
@@ -1067,9 +1061,8 @@ class Join::Natural { ... }
 class Join::Cross { ... }
 class Table::Simple { ... }
 class Table::Renamed { ... }
-role Join { ... }
 
-enum Join::Type (:Inner<inner>, :Left<left>, :Right<right>, :Outer<outer>);
+enum Join::Type (:Inner<inner>, :Left<left>, :Right<right>, :Full<full>);
 
 role Source {
 	multi method COERCE(Identifier:D(Str:D) $name) {
@@ -1078,6 +1071,7 @@ role Source {
 	multi method COERCE(Identifier:D(List:D) $name) {
 		Table::Simple.new(:$name);
 	}
+
 	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Identifier(Cool) :$value)) {
 		Table::Renamed.new(:name($value), :alias($key));
 	}
@@ -1091,11 +1085,21 @@ role Source {
 		my Function(Map) $function = $value;
 		Source::Function.new(:$function, :alias($key));
 	}
+	
+	multi method COERCE(Map (Identifier:D(Cool:D) :$table!, Identifier() :$alias!, Identifiers() :$columns, Bool :$only)) {
+		Table::Renamed.new(:$table, :$alias, :$columns, :$only);
+	}
+	multi method COERCE(Map (Identifier:D(Cool:D) :$table!, Bool :$only)) {
+		Table::Simple.new(:$table, :$only);
+	}
+	multi method COERCE(Map (Function:D(Map) :$function!, Identifier() :$alias!, Identifiers() :$columns, Bool :$lateral, Bool :$ordinal)) {
+		Source::Function.new(:$function, :$alias, :$columns, :$lateral, :$ordinal);
+	}
+	multi method COERCE(Map (Select(Map) :$query!, Identifier:D(Cool:D) :$alias!, Identifiers() :$columns, Bool :$lateral)) {
+		Source::Query.new(:query($query), :$alias, :$columns, :$lateral);
+	}
 	multi method COERCE(Map (Source:D(Any:D) :$left!, Source:D(Any:D) :$right!, *%args)) {
 		$left.join($right, |%args);
-	}
-	multi method COERCE(Map:D (Select(Map) :$query!, Identifier:D(Cool:D) :$as!)) {
-		Source::Query.new(:query($query), :alias($as));
 	}
 
 	multi method join(Source:D(Any:D) $right, Join::Conditions(Any) :$on!, Join::Type(Str) :$type = Join::Type::Inner) {
@@ -1130,17 +1134,6 @@ role Table does Source {
 
 class Table::Simple does Table does Source::Named {
 	method alias() { $!name }
-
-	proto method as(|) { * }
-	multi method as(Identifier:D(Cool:D) $alias) {
-		Table::Renamed.new(:$!name, :$alias, :$!only);
-	}
-	multi method as(Identifier:D(Cool:D) $alias, Identifiers(Any) $columns) {
-		iTable::Renamed.new(:$!name, :$alias, :$columns, :$!only);
-	}
-	multi method as(Pair $pair) {
-		Table::Renamed.new($!name, :alias($pair.key), :columns($pair.value), :$!only);
-	}
 }
 
 role Source::Aliased does Source::Named {
@@ -1238,11 +1231,11 @@ class Delayed {
 	has Any $.default;
 
 	proto method new(|args) { * }
-	multi method new(Str:D $identifier, Any :$default!, Any:U :$type = $default.WHAT) {
-		self.bless(:$identifier, :$type, :$default, :has-default);
-	}
 	multi method new(Str:D $identifier, Any:U :$type) {
 		self.bless(:$identifier, :$type);
+	}
+	multi method new(Str:D $identifier, Any $default, Any:U :$type = $default.WHAT) {
+		self.bless(:$identifier, :$type, :$default, :has-default);
 	}
 }
 
@@ -1744,13 +1737,13 @@ class Renderer::SQL does Renderer {
 	multi method render-expression(Placeholders $placeholders, Insert $insert, Precedence --> Str) {
 		my @common     = self.render-common-tables($placeholders, $insert.common-tables);
 		my @target     = self.render-table($insert.target);
-		my @fields     = self.render-identifiers($insert.fields);
+		my @columns    = self.render-identifiers($insert.columns);
 		my @overriding = self.render-overriding($insert.overriding);
 		my @content    = self.render-insert-content($placeholders, $insert);
 		my @conflict   = self.render-conflict($placeholders, $insert.conflict);
 		my @returning  = self.render-column-expressions($placeholders, $insert.returning, 'RETURNING');
 
-		(@common, 'INSERT INTO', @target, @fields, @overriding, @content, @conflict, @returning).flat.join(' ');
+		(@common, 'INSERT INTO', @target, @columns, @overriding, @content, @conflict, @returning).flat.join(' ');
 	}
 
 	multi method render-expression(Placeholders $placeholders, Delete $delete, Precedence) {
@@ -1778,7 +1771,7 @@ class Renderer::SQL does Renderer {
 	}
 }
 
-has Renderer:D $.renderer is required;
+has Renderer:D $.renderer is required handles<render>;
 
 multi submethod BUILD(Renderer:D :$!renderer!) {}
 my %holder-for = (
@@ -1798,30 +1791,30 @@ method select(Source:D(Any:D) $source, Column::List:D(Any:D) $columns = *, Condi
 	$!renderer.render($select);
 }
 
-multi method insert(Table:D(Any:D) $target, Identifiers(Any) $fields, Rows:D(List:D) $rows, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	my $insert = Insert::Values.new(:$target, :$fields, :$rows, :$overriding, :$conflict, :$returning);
-	$!renderer.render($insert);
-}
-multi method insert(Table:D(Any:D) $target, Assigns:D(Any:D) $values, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	samewith($target, $values.keys, [$values.values,], :$overriding, :$conflict, :$returning);
-}
-multi method insert(Table(Any) $target, Identifiers(Any) $fields, Select $select, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	my $insert = Insert::Select.new(:$target, :$fields, :$select, :$overriding, :$conflict, :$returning);
-	$!renderer.render($insert);
-}
-multi method insert(Table:D(Any:D) $target, Value::Default, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	my $insert = Insert::Defaults.new(:$target, :$overriding, :$conflict, :$returning);
-	$!renderer.render($insert);
-}
-
-method update(Table:D(Any:D) $target, Assigns:D(Any:D) $assigns, Conditions(Any) $where?, Source(Any) :$from, Column::List(Any) :$returning) {
+method update(Table:D(Any:D) $target, Assigns:D(Any:D) $assigns, Conditions(Any) $where?, Common(Any) :$common-tables, Source(Any) :$from, Column::List(Any) :$returning) {
 	my @assignments = $assigns.assignments;
-	my $update = Update.new(:$target, :@assignments, :$where, :$from, :$returning);
+	my $update = Update.new(:$common-tables, :$target, :@assignments, :$where, :$from, :$returning);
 	$!renderer.render($update);
 }
 
-method delete(Table:D(Any:D) $target, Conditions(Any) $where, Source(Any) :$using, Column::List(Any) :$returning) {
-	my $delete = Delete.new(:$target, :$where, :$using, :$returning);
+multi method insert(Table:D(Any:D) $target, Identifiers(Any) $columns, Rows:D(List:D) $rows, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+	my $insert = Insert::Values.new(:$common-tables, :$target, :$columns, :$rows, :$overriding, :$conflict, :$returning);
+	$!renderer.render($insert);
+}
+multi method insert(Table:D(Any:D) $target, Assigns:D(Any:D) $values, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+	samewith($target, $values.keys, [$values.values,], :$common-tables, :$overriding, :$conflict, :$returning);
+}
+multi method insert(Table(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+	my $insert = Insert::Select.new(:$common-tables, :$target, :$columns, :$select, :$overriding, :$conflict, :$returning);
+	$!renderer.render($insert);
+}
+multi method insert(Table:D(Any:D) $target, Value::Default, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+	my $insert = Insert::Defaults.new(:$common-tables, :$target, :$overriding, :$conflict, :$returning);
+	$!renderer.render($insert);
+}
+
+method delete(Table:D(Any:D) $target, Conditions(Any) $where, Common(Any) :$common-tables, Source(Any) :$using, Column::List(Any) :$returning) {
+	my $delete = Delete.new(:$common-tables, :$target, :$where, :$using, :$returning);
 	$!renderer.render($delete);
 }
 
@@ -1912,8 +1905,7 @@ SQL::Abstract - Generate SQL from Raku data structures
 
 use SQL::Abstract;
 
-my $placeholders = SQL::Abstract::Placeholders::Postgres;
-my $abstract = SQL::Abstract.new(:$placeholders);
+my $abstract = SQL::Abstract.new(:placeholders<dbi>);
 my $query = $abstract.select('table', <foo bar>, :id(3));
 my $result = $dbh.query($result.sql, $result.arguments);
 
@@ -1937,6 +1929,8 @@ It should be able to represent any C<SELECT>, C<UPDATE>, C<INSERT>, or C<DELETE>
 SQL::Abstract uses various helper types:
 
 =head2 SQL::Abstract::Identifier
+
+This represents an identifier (typically a table name or column name, or an alias for such). It can be created from either:
 
 =begin item2
 Str
@@ -1971,14 +1965,36 @@ This represents the named table, with the elements of the list representing the 
 =end item2
 
 =begin item2
-Pair (Str/List => Source())
+Pair (Str => Identifier(Cool))
 
-This will rename the table in the value to the name in the key. The value will be expanded as above.
+This will rename the table in the value to the name in the key.
+=end item2
+
+=begin item2
+Pair (Str => Select(Map))
+
+This will use the result of a subquery as if it's a table.
+=end item2
+
+=begin item2
+Hash
+
+This will join two `Source`s, named C<left> and C<right>, it requires one of the following entries to join them on:
+
+=item3 Join::Conditions() :$on
+=item3 Identifiers() :$conditions
+=item3 Bool :$natural
+=item3 Bool :$cross
+
+e.g. C<< { :left<artist>, :right<album>, :using<album_id>, :type<left> } >> or C<< { :left<artist>, :right<album>, :on{'artist.id' => 'album.artist_id'} } >>
+
+The first three joiners take an optional C<:$type> argument that can be any of C<"inner">/C<Join::Type::Inner>, C<"left">/C<Join::Type::Left>, C<"right">/C<Join::Type::Right> or C<"full">/C<Join::Type::Full>.
+
 =end item2
 
 =head2 SQL::Abstract::Table does SQL::Abstract::Source
 
-This class takes the same 
+This role takes the same conversions as C<Source>, but only the ones that represent a table. Unlike other sources, this can be used for mutating operations (update/insert/delete).
 
 =head2 SQL::Abstract::Column::List
 
@@ -1987,6 +2003,10 @@ This is a list much like C<Identifiers>, however it will accept not just identif
 =head2 SQL::Abstract::Conditions
 
 This is a pair, a list of pairs, a hash or an C<Expression>. In the former three cases, the key (called left in the rest of this section) shall be an C<Identifier()> designating a column name, or an C<Expression>. The right hand side can be one of several types:
+
+=head3 Expression
+
+This will be used as-is
 
 =head3 Any:U
 
@@ -2038,6 +2058,10 @@ This will be interpreted as a conjunction of the hash pairs. E.g. C<:left{ '>' =
 
 This will check against the values in the function. E.g. C<:left(1|2|4)> will render like C<left IN (1, 2, 4)>.
 
+=head3 Capture
+
+This will be used as a literal value. E.g. C<:left(\'NOW()')> will render like C<left = NOW()>.
+
 =head3 Any
 
 If none of the above options match, the value will be compared to as is (as a placeholder). C<:left(2)> will render equivalent to C<left = 2>.
@@ -2048,9 +2072,11 @@ This takes a list of pairs, or a hash. The keys shall be a value or an expressio
 
 =head2 SQL::Abstract::OrderBy
 
-This takes a list of things to sort by. Much like C<Column::List> this accepts identifiers and expressions, but C<*> isn't allowed and pair values are interpreted as order modifier (e.g. C<:column<desc>>). A hash element will be expanded to  (e.g. C<< { :column<column_name>, :order<desc>, :nulls<last> } >>)
+This takes a list of things to sort by. Much like C<Column::List> this accepts identifiers and expressions, but C<*> isn't allowed and pair values are interpreted as order modifier (e.g. C<:column<desc>>). A hash element will be expanded as well (e.g. C<< { :column<column_name>, :order<desc>, :nulls<last> } >>)
 
 =head1 Class SQL::Abstract
+
+This is the main class of the 
 
 =head3 new(:$placeholders!)
 
@@ -2068,81 +2094,67 @@ C<postgres>/C<SQL::Abstract::Placeholders::Postgres>
 This will use Postgres style C<($1, $2)> placeholders.
 =end item1
 
-=head3 select(Source() $source, Column::List() $columns?, Conditions() $where?, Bool :$distinct, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, Locking :$locking)
+=head3 select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset)
 
-This will generate a C<SELECT> query.
+This will generate a C<SELECT> query. It will select C<$columns> from C<$source>, filtering by $conditions. 
 
-=begin item1
-Source(Any:D) $source
+=begin code :lang<raku>
 
-=end item1
+my $join = { :left<books>, :right<authors>, :using<author_id> };
+my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost{ '<' => 10 } });
+# SELECT books.name, authors.name FROM books INNER JOIN authors USING (author_id) WHERE cost < 10
 
-=begin item1
-Column::List(Any:D) $columns = *
+$abstract.select('artists', [ 'name', :sum{ :function<count>, :arguments(*) } ], { :name(:like('A%')) }, :group-by<name>, :order-by(:sum<desc>));
+# SELECT name, COUNT(*) as sum FROM artists WHERE name LIKE 'A%' GROUP BY name ORDER BY sum DESC
 
-This will contain the requested columns. It 
+=end code
 
-=end item1
+=head3 update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
 
-=begin item1
-Conditions(Any) $where?
+This will update C<$target> by assigning the columns and values from C<$set> if they match C<$where>, returning C<$returning>.
 
-This will be the C<WHERE> conditions.
+=head3 insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
 
-=end item1
+Insert into C<$target>, assigning each of the values in Rows to a new row in the table.
 
-=begin item1
-Bool :$distinct
+=begin code :lang<raku>
 
+$abstract.insert('artists', ['name'], [ [ 'Metallica'], ], :returning(*));
+# INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
 
-=end item1
+$abstract.insert('artists', List, [ [ 'Metallica'], ], :returning(*));
+# INSERT INTO artists VALUES ('Metallica') RETURNING *
 
-=begin item1
-Column::List(Any) :$group-by
+=end code
 
-Group by the listed columns. They're interpreted the same as C<$columns> is interpreted.
-=end item1
+=head3 insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
 
-=begin item1
-Conditions(Any) :$having?
+Inserts the values in C<$values> into the table C<$target>, returning the columns in C<$returning>
 
-This will be the C<HAVING> conditions. it works described below in the Conditions section. This only makes sense to use when using C<$group-by>.
-=end item1
+=begin code :lang<raku>
 
-=begin item1
-OrderBy(Any) :$order-by
+$abstract.insert('artists', { :name<Metallica> }, :returning(*));
+# INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
 
-=end item1
+=end code
 
-=begin item1
-Int :$limit
+=head3 insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
 
-Limit the number of rows returned by the database.
-=end item1
+=begin code :lang<raku>
 
-=begin item1
-Int :$offset
+$abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
+# INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
 
-Sets an offset for the returned values. This only makes sense if C<$limit> is also set.
-=end item1
+=end code
 
-=begin item1
-Locking(Any) :$locking
+=head3 delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
 
-This sets the locking clause of the query. Reasonably portable values for this include:
+=begin code :lang<raku>
 
-=item2 C<'update'>/C<SQL::Abstract::Locking::Strength::Update>
-=item2 C<'share'>/C<SQL::Abstract::Locking::Strength::Share>
+$abstract.delete('artists', { :name<Madonna> });
+# DELETE FROM artists WHERE name = 'Madonna'
 
-=end item1
-
-=head3 update(Table(Cool) $target, Assigns(Hash) $set, Conditions(Any) $where?, Source(Any) :$from, Column::List(Any) :$returning)
-
-=head3 insert(Table(Cool) $target, Column::List(Any) $fields, Rows(Any) $rows, Column::List(Any) :$returning)
-
-=head3 insert(Table(Cool) $target, Assigns(Hash) $values, Column::List(Any) :$returning)
-
-=head3 delete(Table(Cool) $target, Conditions(Any) $where?, Column::List(Any) :$returning)
+=end code
 
 =head1 Author
 
