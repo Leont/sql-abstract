@@ -7,7 +7,7 @@
   ],
   "depends": [
   ],
-  "description": "blah blah blah",
+  "description": "Generate SQL from Raku data structures",
   "license": "Artistic-2.0",
   "name": "SQL::Abstract",
   "perl": "6.d",
