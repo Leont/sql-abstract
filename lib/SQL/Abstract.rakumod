@@ -124,6 +124,11 @@ role Value::List does Expression {
 	method precedence(--> Precedence::Rowlike) {}
 
 	method elements() { ... }
+
+	multi method merge(::?CLASS $other) {
+		my @elements = |self.elements, |$other.elements:
+		self.new(:@elements);
+	}
 }
 
 class Identifiers does Value::List {
@@ -138,11 +143,6 @@ class Identifiers does Value::List {
 	}
 	multi method COERCE(List:U $list) {
 		Identifiers;
-	}
-
-	multi method merge(Identifiers $other) {
-		my @elements = |@!elements, |$other.elements:
-		self.new(:@elements);
 	}
 }
 
@@ -185,11 +185,6 @@ class Column::List does Value::List {
 	}
 	multi method COERCE(Identifiers $elements) {
 		self.new(:elements($elements.elements));
-	}
-
-	multi method merge(Column::List $other) {
-		my @elements = |@!elements, |$other.elements:
-		self.new(:@elements);
 	}
 }
 
