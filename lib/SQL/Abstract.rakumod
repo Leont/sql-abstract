@@ -151,28 +151,29 @@ class Function { ... }
 class Column::List does Value::List {
 	has Expression:D @.elements is required;
 
-	my multi to-column(Expression $column) {
+	our proto to-column(|) { * }
+	multi to-column(Expression $column) {
 		$column;
 	}
-	my multi to-column(Identifier(Str) $column) {
+	multi to-column(Identifier(Str) $column) {
 		$column;
 	}
-	my multi to-column(Identifier(List) $column) {
+	multi to-column(Identifier(List) $column) {
 		$column;
 	}
-	my multi to-column(Pair $ (:$key, :$value)) {
+	multi to-column(Pair $ (:$key, :$value)) {
 		Expression::Renamed.COERCE($key => to-column($value));
 	}
-	my multi to-column(Pair (:$key, Bool :$value)) {
+	multi to-column(Pair (:$key, Bool :$value)) {
 		Identifier.new($key);
 	}
-	my multi to-column(Whatever) {
+	multi to-column(Whatever) {
 		Identifier.new('*');
 	}
-	my multi to-column(Map $map (Str :$function!, :%over!, *%args)) {
+	multi to-column(Map $map (Str :$function!, :%over!, *%args)) {
 		Function.COERCE({ :name($function), |%args }).over(|%over);
 	}
-	my multi to-column(Map $map (Str :$function!, *%args)) {
+	multi to-column(Map $map (Str :$function!, *%args)) {
 		Function.COERCE({ :name($function), |%args });
 	}
 
@@ -920,8 +921,40 @@ class Distinction::Columns does Distinction {
 	has Column::List $.columns;
 }
 
-class GroupBy is Column::List {
+class GroupBy {
+	has Expression @.elements;
 	has Bool $.all;
+
+	multi to-grouping(Any $column) {
+		Column::List::to-column($column);
+	}
+	multi to-grouping(Column::List(List) $column) {
+		$column;
+	}
+	multi to-grouping(Pair $pair) {
+		Function.COERCE({ :name($pair.key), :arguments($pair.value) });
+	}
+	multi to-grouping(Pair $pair (:$key where $key.lc eq 'grouping sets', :$value)) {
+		my @values = $value.map(&to-grouping);
+		Function.COERCE({ :name($key), :arguments(@values) });
+	}
+
+	multi method COERCE(Any $grouping) {
+		self.new(:elements[to-grouping($grouping)]);
+	}
+	multi method COERCE(@list) {
+		my @elements = @list.map(&to-grouping);
+		self.new(:@elements);
+	}
+	multi method COERCE(Identifiers $elements) {
+		self.new(:elements($elements.elements));
+	}
+	multi method COERCE(Column::List $elements) {
+		self.new(:elements($elements.elements));
+	}
+	multi method COERCE(Hash $ (Bool :$all, :@elements)) {
+		self.new(:$all, :elements(@elements.map(&to-grouping)));
+	}
 }
 
 role Source { ... }

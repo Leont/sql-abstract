@@ -166,12 +166,19 @@ is-deeply $select-groupby1, result('SELECT bar, baz FROM my_table WHERE foo = $1
 my $select-groupby2 = $abstract.select('my_table', <bar baz>, { :1foo }, :group-by<bar>, :having({:baz('>' => 15)}));
 is-deeply $select-groupby2, result('SELECT bar, baz FROM my_table WHERE foo = $1 GROUP BY bar HAVING baz > $2', [1, 15]);
 
+my $select-groupby3 = $abstract.select('my_table', <bar baz>, { :1foo }, :group-by(:CUBE<bar>));
+is-deeply $select-groupby3, result('SELECT bar, baz FROM my_table WHERE foo = $1 GROUP BY CUBE(bar)', [1]);
+
+my $select-groupby4 = $abstract.select('my_table', <bar baz>, { :1foo }, :group-by('GROUPING SETS' => (:ROLLUP<bar>)));
+is-deeply $select-groupby4, result('SELECT bar, baz FROM my_table WHERE foo = $1 GROUP BY GROUPING SETS(ROLLUP(bar))', [1]);
+
 
 my $select-locking1 = $abstract.select('my_table', <bar baz>, { :1foo }, :locking<update>);
 is-deeply $select-locking1, result('SELECT bar, baz FROM my_table WHERE foo = $1 FOR UPDATE', [1]);
 
 my $select-locking2 = $abstract.select('my_table', <bar baz>, { :1foo }, :locking(:update<foo>));
 is-deeply $select-locking2, result('SELECT bar, baz FROM my_table WHERE foo = $1 FOR UPDATE OF foo', [1]);
+
 
 my $e = $abstract.binary('<', $abstract.value(1), $abstract.logical('and', [ $abstract.value(1), $abstract.value(2)]));
 my $select-precedence1 = $abstract.select('my_table', <bar baz>, $e);
