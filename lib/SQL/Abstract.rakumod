@@ -61,16 +61,16 @@ class Value::True    does Constant['TRUE']    {}
 class Value::False   does Constant['FALSE']   {}
 class Value::Null    does Constant['NULL']    {}
 
-my multi expand-expression(Expression $expression) {
+multi expand-expression(Expression $expression) {
 	$expression;
 }
-my multi expand-expression(Any:D $value) {
+multi expand-expression(Any:D $value) {
 	Placeholder.new(:$value);
 }
-my multi expand-expression(Any:U) {
+multi expand-expression(Any:U) {
 	Value::Null.new;
 }
-my multi expand-expression(Literal(Capture:D) $literal) {
+multi expand-expression(Literal(Capture:D) $literal) {
 	$literal;
 }
 
@@ -90,7 +90,7 @@ class Identifier does Term {
 		self.new([|@!parts, |$other.parts]);
 	}
 
-	my sub quote(Str $part) {
+	sub quote(Str $part) {
 		'"' ~ $part.subst('"', '""', :g) ~ '"';
 	}
 	method Str() {
@@ -462,20 +462,20 @@ role Conditional {
 }
 
 class Conditions does Conditional {
-	my multi expand-partial(Expression $left, Any:D $expression) {
+	multi expand-partial(Expression $left, Any:D $expression) {
 		Op::Equals.new(:$left, :right(expand-expression($expression)));
 	}
-	my multi expand-partial(Expression $value, Any:U $) {
+	multi expand-partial(Expression $value, Any:U $) {
 		Op::IsNull.new(:$value);
 	}
 
-	my multi expand-pair(Expression $value, 'isnull', $) {
+	multi expand-pair(Expression $value, 'isnull', $) {
 		Op::IsNull.new(:$value);
 	}
-	my multi expand-pair(Expression $value, 'isnotnull', $) {
+	multi expand-pair(Expression $value, 'isnotnull', $) {
 		Op::IsNull.new(:$value, :negated);
 	}
-	my multi expand-pair(Expression $left, Str $key, Any:D $value) {
+	multi expand-pair(Expression $left, Str $key, Any:D $value) {
 		my $right = expand-expression($value);
 		if %binary-op-for{$key}:exists {
 			%binary-op-for{$key}.new(:$left, :$right);
@@ -483,50 +483,50 @@ class Conditions does Conditional {
 			Op::Comperative[$key].new(:$left, :$right);
 		}
 	}
-	my multi expand-partial(Expression $left, Pair (:$key, :$value)) {
+	multi expand-partial(Expression $left, Pair (:$key, :$value)) {
 		expand-pair($left, $key, $value);
 	}
 
-	my multi expand-partial(Expression $left, %hash) {
+	multi expand-partial(Expression $left, %hash) {
 		%hash.sort(*.key).map: { expand-partial($left, $^pair) };
 	}
-	my multi expand-partial(Expression $left, Range $range) {
+	multi expand-partial(Expression $left, Range $range) {
 		my $min = expand-expression($range.min);
 		my $max = expand-expression($range.max);
 		Op::Between.new(:$left, :$min, :$max);
 	}
 
-	my multi expand-junction(Expression $left, 'any', @partials) {
+	multi expand-junction(Expression $left, 'any', @partials) {
 		Op::Or.pack(@partials);
 	}
-	my multi expand-junction(Expression $left, 'any', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
+	multi expand-junction(Expression $left, 'any', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
 		Op::In::List.new(:$left, :elements(@partials».right));
 	}
-	my multi expand-junction(Expression $left, 'all', @partials) {
+	multi expand-junction(Expression $left, 'all', @partials) {
 		Op::And.pack(@partials);
 	}
-	my multi expand-junction(Expression $left, 'none', @partials) {
+	multi expand-junction(Expression $left, 'none', @partials) {
 		Op::Or.pack(@partials).negate;
 	}
-	my multi expand-junction(Expression $left, 'none', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
+	multi expand-junction(Expression $left, 'none', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
 		Op::In::List.new(:$left, :elements(@partials».right), :negated);
 	}
-	my multi expand-junction(Expression $left, 'one', @partials) {
+	multi expand-junction(Expression $left, 'one', @partials) {
 		my @comparisons = @partials.map: { Op::Cast.new(:$^primary, :typename<INTEGER>) };
 		my $addition = @comparisons.reduce: { Op::Plus.new(:$^left, :$^right) };
 		Op::Equals.new(:left($addition), :right(Integer.new(:1value)));
 	}
-	my multi expand-partial(Expression $left, Junction $junction) {
+	multi expand-partial(Expression $left, Junction $junction) {
 		use nqp;
 		my $type = nqp::box_s(nqp::getattr($junction, Junction, '$!type'), Str);
 		my @eigenstates = nqp::getattr($junction, Junction, '$!eigenstates').List;
 		expand-junction($left, $type, @eigenstates.map({ expand-partial($left, $^value) }));
 	}
 
-	my multi expand-condition(Pair (Identifier(Cool) :$key, Mu :$value)) {
+	multi expand-condition(Pair (Identifier(Cool) :$key, Mu :$value)) {
 		expand-partial($key, $value);
 	}
-	my multi expand-condition(Pair (Expression :$key, Mu :$value)) {
+	multi expand-condition(Pair (Expression :$key, Mu :$value)) {
 		expand-partial($key, $value);
 	}
 
@@ -573,16 +573,16 @@ class Order::Modifier does Expression {
 class OrderBy {
 	has Expression:D @.elements is required;
 
-	my multi to-sorter(Expression:D $expression) {
+	multi to-sorter(Expression:D $expression) {
 		$expression;
 	}
-	my multi to-sorter(Identifier:D(Cool:D) $ident) {
+	multi to-sorter(Identifier:D(Cool:D) $ident) {
 		$ident;
 	}
-	my multi to-sorter(Order::Modifier:D(Pair:D) $modifier) {
+	multi to-sorter(Order::Modifier:D(Pair:D) $modifier) {
 		$modifier;
 	}
-	my multi to-sorter(Order::Modifier:D(Map:D) $modifier) is default {
+	multi to-sorter(Order::Modifier:D(Map:D) $modifier) is default {
 		$modifier;
 	}
 
@@ -1324,10 +1324,10 @@ class Renderer::SQL does Renderer {
 	has Placeholders $.placeholders is required;
 	has Bool:D $.quoting = False;
 
-	my sub parenthesize-if(Str $input, Bool() $parenthese --> Str) {
+	sub parenthesize-if(Str $input, Bool() $parenthese --> Str) {
 		$parenthese ?? "($input)" !! $input;
 	}
-	my sub parenthesize-list(@items, Str $with = " ") {
+	sub parenthesize-list(@items, Str $with = " ") {
 		"({ @items.join($with) })";
 	}
 
