@@ -51,6 +51,12 @@ my $like = SQL::Abstract::Op::Like.new(:left($abstract.identifier('foo')), :righ
 my $select-simple12 = $abstract.select('my_table', <bar baz>, $like);
 is-deeply $select-simple12, result('SELECT bar, baz FROM my_table WHERE foo LIKE $1 ESCAPE $2', ['foo%', '\\']);
 
+my $select-simple13 = $abstract.select('my_table', <bar baz>, { :foo(SQL::Abstract::Value::False) });
+is-deeply $select-simple13, result('SELECT bar, baz FROM my_table WHERE foo = FALSE', []);
+
+my $select-simple14 = $abstract.select('my_table', <bar baz>, { :foo(SQL::Abstract::Value::Null) });
+is-deeply $select-simple14, result('SELECT bar, baz FROM my_table WHERE foo IS NULL', []);
+
 
 my $select-type1 = $abstract.select('my_table', <bar baz>, { :foo });
 is-deeply $select-type1, result('SELECT bar, baz FROM my_table WHERE foo = $1', [ True ]);
@@ -255,6 +261,9 @@ is-deeply $insert10, result('INSERT INTO my_table (bar, baz) OVERRIDING SYSTEM V
 
 my $insert11 = $abstract.insert('my_table', List, [ [ 1, 42 ], ]);
 is-deeply $insert11, result('INSERT INTO my_table VALUES ($1, $2)', [1, 42]);
+
+my $insert12 = $abstract.insert('my_table', { bar => SQL::Abstract::Value::Default, baz => 43 });
+is-deeply $insert12, result('INSERT INTO my_table (bar, baz) VALUES (DEFAULT, $1)', [43]);
 
 
 my $update1 = $abstract.update('my_table', { bar => 1, baz => 42 });

@@ -51,6 +51,9 @@ class Placeholder does Term {
 }
 
 role Constant[Str $keyword] does Term {
+	method Str() {
+		$keyword;
+	}
 	method WHICH() {
 		ValueObjAt.new("SQL::Abstract::Constant|$keyword");
 	}
@@ -466,6 +469,12 @@ class Conditions does Conditional {
 		Op::Equals.new(:$left, :right(expand-expression($expression)));
 	}
 	multi expand-partial(Expression $value, Any:U $) {
+		Op::IsNull.new(:$value);
+	}
+	multi expand-partial(Expression $left, Constant:U $constant) {
+		Op::Equals.new(:$left, :right($constant.new));
+	}
+	multi expand-partial(Expression $value, Constant $constant where Value::Null) {
 		Op::IsNull.new(:$value);
 	}
 
