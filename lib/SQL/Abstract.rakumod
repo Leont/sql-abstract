@@ -2,6 +2,8 @@ unit class SQL::Abstract;
 
 use fatal;
 
+use SQL::Placeholders;
+
 enum Precedence <Rowlike Comma Assignment And Or Not Between In Postfix Comparative Bitwise Additive Multiplicative Concatlike Prefix Termlike>;
 
 class Op::Not { ... }
@@ -1245,25 +1247,6 @@ class Source::Function does Source::Nested {
 	has Bool       $.ordinal;
 }
 
-role Placeholders {
-	has @.values is built(False);
-	method bind(Any $value) { ... }
-}
-
-class Placeholders::DBI does Placeholders {
-	method bind(Any $value --> Str) {
-		@!values.push($value);
-		'?';
-	}
-}
-
-class Placeholders::Postgres does Placeholders {
-	method bind(Any $value --> Str) {
-		@!values.push($value);
-		'$' ~ +@!values;
-	}
-}
-
 class Delayed {
 	has Str:D $.identifier is required;
 	has Any:U $.type;
@@ -1815,8 +1798,8 @@ has Renderer:D $.renderer is required handles<render>;
 
 multi submethod BUILD(Renderer:D :$!renderer!) {}
 my %holder-for = (
-	dbi      => Placeholders::DBI,
-	postgres => Placeholders::Postgres,
+	dbi      => SQL::Placeholders::DBI,
+	postgres => SQL::Placeholders::Postgres,
 );
 multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, Str:D :placeholders($placeholder-str)!, *%arguments) {
 	my $placeholders = %holder-for{$placeholder-str}:exists ?? %holder-for{$placeholder-str} !! die "No such placeholder style $placeholder-str";

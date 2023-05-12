@@ -12,7 +12,8 @@
   "name": "SQL::Abstract",
   "perl": "6.d",
   "provides": {
-    "SQL::Abstract": "lib/SQL/Abstract.rakumod"
+    "SQL::Abstract": "lib/SQL/Abstract.rakumod",
+    "SQL::Placeholders": "lib/SQL/Placeholders.rakumod"
   },
   "resources": [
   ],
