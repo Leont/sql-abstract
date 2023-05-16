@@ -2,6 +2,7 @@ Revision history for SQL-Abstract
 
 {{$NEXT}}
     - Split out Placeholders to SQL::Placeholders
+    - Move Query to SQL::Query
 
 0.0.2  2022-10-15T13:49:47+02:00
     - Make GroupBy support non-trivial grouping elements

@@ -3,6 +3,7 @@ unit class SQL::Abstract;
 use fatal;
 
 use SQL::Placeholders;
+use SQL::Query;
 
 enum Precedence <Rowlike Comma Assignment And Or Not Between In Postfix Comparative Bitwise Additive Multiplicative Concatlike Prefix Termlike>;
 
@@ -1247,61 +1248,6 @@ class Source::Function does Source::Nested {
 	has Bool       $.ordinal;
 }
 
-class Delayed {
-	has Str:D $.identifier is required;
-	has Any:U $.type;
-	has Bool:D $.has-default = False;
-	has Any $.default;
-
-	proto method new(|args) { * }
-	multi method new(Str:D $identifier, Any:U :$type) {
-		self.bless(:$identifier, :$type);
-	}
-	multi method new(Str:D $identifier, Any $default, Any:U :$type = $default.WHAT) {
-		self.bless(:$identifier, :$type, :$default, :has-default);
-	}
-}
-
-class Result {
-	has Str:D $.sql is required;
-	has @.arguments is required;
-
-	multi type-of(Any $value) {
-		$value.WHAT;
-	}
-	multi type-of(Delayed $value) {
-		$value.type;
-	}
-	method type-hints() {
-		@!arguments.map(&type-of);
-	}
-
-	multi resolve-value(Any $value, %replacements) {
-		$value;
-	}
-	multi resolve-value(Delayed $delayed, %replacements) {
-		if %replacements{$delayed.identifier}:exists {
-			%replacements{$delayed.identifier};
-		} elsif $delayed.has-default {
-			$delayed.default;
-		} else {
-			die "No value given for delayed value '$delayed.identifier()'"
-		}
-	}
-
-	method resolve(%replacements?) {
-		@!arguments.map: { resolve-value($^element, %replacements) };
-	}
-
-	method identifiers() {
-		@!arguments.grep(Delayed)».identifier;
-	}
-
-	method has-delayed(--> Bool) {
-		so any(@!arguments) ~~ Delayed;
-	}
-}
-
 role Renderer {
 	method render() { ... }
 }
@@ -1790,7 +1736,7 @@ class Renderer::SQL does Renderer {
 	method render(Expression $expression) {
 		my $placeholders = self.placeholders.new;
 		my $sql          = self.render-expression($placeholders, $expression, Precedence::Rowlike);
-		Result.new(:$sql, :arguments($placeholders.values));
+		SQL::Query.new($sql, $placeholders.values);
 	}
 }
 
@@ -1847,15 +1793,15 @@ multi method values(Rows:D(List:D) $rows, OrderBy(Any) :$order-by, Limit(Any) :$
 }
 
 method begin() {
-	Result.new(:sql<BEGIN>);
+	SQL::Query.new('BEGIN');
 }
 
 method rollback() {
-	Result.new(:sql<ROLLBACK>);
+	SQL::Query.new('ROLLBACK');
 }
 
 method commit() {
-	Result.new(:sql<COMMIT>);
+	SQL::Query.new('COMMIT');
 }
 
 
@@ -1897,10 +1843,6 @@ method function(Str $name, Column::List:D(Any:D) $arguments = (), Conditions(Any
 
 method value(Any $value) {
 	expand-expression($value);
-}
-
-method delay(|arguments) {
-	Delayed.new(|arguments);
 }
 
 method null() {

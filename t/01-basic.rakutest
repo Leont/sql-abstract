@@ -1,10 +1,11 @@
 #! raku
 
 use Test;
+use SQL::Query :delay;
 use SQL::Abstract;
 
 sub result(Str $sql, @arguments?) {
-	SQL::Abstract::Result.new(:$sql, :@arguments);
+	SQL::Query.new($sql, @arguments);
 }
 
 my $result1 = result('SELECT * FROM foo', [1, 2, 3]);
@@ -319,16 +320,16 @@ my $prepared1 = result('', [1, 2, 3]);
 is-deeply $prepared1.resolve, (1, 2, 3);
 is-deeply $prepared1.type-hints, (Int, Int, Int);
 
-my $prepared2 = result('', [1, 2, $abstract.delay('foo')]);
+my $prepared2 = result('', [1, 2, delay('foo')]);
 dies-ok { $prepared2.resolve };
 is-deeply $prepared2.type-hints, (Int, Int, Any);
 is-deeply $prepared2.resolve({ :3foo }), (1, 2, 3);
 is-deeply $prepared2.identifiers, ('foo',);
 
-my $prepared3 = result('', [1, 2, $abstract.delay('foo', :type(Int))]);
+my $prepared3 = result('', [1, 2, delay('foo', :type(Int))]);
 is-deeply $prepared3.type-hints, (Int, Int, Int);
 
-my $prepared4 = result('', [1, 2, $abstract.delay('foo', 3)]);
+my $prepared4 = result('', [1, 2, delay('foo', 3)]);
 is-deeply $prepared4.type-hints, (Int, Int, Int);
 is-deeply $prepared4.resolve, (1, 2, 3);
 is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
