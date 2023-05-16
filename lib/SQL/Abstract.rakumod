@@ -905,7 +905,10 @@ class Common {
 	has Rename @.tables;
 	has Bool $.recursive;
 
-	method COERCE(@pairs) {
+	multi method COERCE(Rename(Pair) $table) {
+		self.new(:tables[$table]);
+	}
+	multi method COERCE(@pairs) {
 		my Rename(Pair) @tables = @pairs;
 		self.new(:@tables);
 	}
