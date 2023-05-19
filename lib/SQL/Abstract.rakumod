@@ -1,4 +1,4 @@
-unit class SQL::Abstract;
+unit class SQL::Abstract:ver<0.0.2>:auth<zef:leont>;
 
 use fatal;
 

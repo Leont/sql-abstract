@@ -1,6 +1,6 @@
 use v6;
 
-unit class SQL::Query;
+unit class SQL::Query:ver<0.0.2>:auth<zef:leont>;
 
 class Delayed {
 	has Str:D $.identifier is required;

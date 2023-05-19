@@ -1,6 +1,6 @@
 unit package SQL;
 
-role Placeholders {
+role Placeholders:ver<0.0.2>:auth<zef:leont> {
 	has @.values is built(False);
 	method bind(Any $value) { ... }
 }
