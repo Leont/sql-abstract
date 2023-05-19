@@ -1769,18 +1769,18 @@ method update(Table:D(Any:D) $target, Assigns:D(Any:D) $assigns, Conditions(Any)
 	$!renderer.render($update);
 }
 
-multi method insert(Table:D(Any:D) $target, Identifiers(Any) $columns, Rows:D(List:D) $rows, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+multi method insert(Table:D(Any) $target, Identifiers(Any) $columns, Rows:D(List:D) $rows, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
 	my $insert = Insert::Values.new(:$common-tables, :$target, :$columns, :$rows, :$overriding, :$conflict, :$returning);
 	$!renderer.render($insert);
 }
-multi method insert(Table:D(Any:D) $target, Assigns:D(Any:D) $values, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+multi method insert(Table:D(Any) $target, Assigns:D(Cool:D) $values, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
 	samewith($target, $values.keys, [$values.values,], :$common-tables, :$overriding, :$conflict, :$returning);
 }
-multi method insert(Table(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+multi method insert(Table:D(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
 	my $insert = Insert::Select.new(:$common-tables, :$target, :$columns, :$select, :$overriding, :$conflict, :$returning);
 	$!renderer.render($insert);
 }
-multi method insert(Table:D(Any:D) $target, Value::Default, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+multi method insert(Table:D(Any) $target, Value::Default $, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
 	my $insert = Insert::Defaults.new(:$common-tables, :$target, :$overriding, :$conflict, :$returning);
 	$!renderer.render($insert);
 }
