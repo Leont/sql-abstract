@@ -1132,11 +1132,11 @@ role Source {
 		Source::Function.new(:$function, :alias($key));
 	}
 	
-	multi method COERCE(Map (Identifier:D(Cool:D) :$table!, Identifier() :$alias!, Identifiers() :$columns, Bool :$only)) {
-		Table::Renamed.new(:$table, :$alias, :$columns, :$only);
+	multi method COERCE(Map (Identifier:D(Cool:D) :table($name)!, Identifier() :$alias!, Identifiers() :$columns, Bool :$only)) {
+		Table::Renamed.new(:$name, :$alias, :$columns, :$only);
 	}
-	multi method COERCE(Map (Identifier:D(Cool:D) :$table!, Bool :$only)) {
-		Table::Simple.new(:$table, :$only);
+	multi method COERCE(Map (Identifier:D(Cool:D) :table($name)!, Bool :$only)) {
+		Table::Simple.new(:$name, :$only);
 	}
 	multi method COERCE(Map (Function:D(Map) :$function!, Identifier() :$alias!, Identifiers() :$columns, Bool :$lateral, Bool :$ordinal)) {
 		Source::Function.new(:$function, :$alias, :$columns, :$lateral, :$ordinal);
@@ -1823,14 +1823,11 @@ method commit() {
 
 
 proto table(|) is export(:functions) { * }
-multi table(Table:D(Any:D) $table) {
-	$table;
+multi table(Any:D $table, Identifier(Cool) :$as!, Identifiers(Any) :$columns = Identifiers, Bool :$only) {
+	Table.COERCE({ :$table, :alias($as), :$columns, :$only });
 }
-multi table(Table:D(Any:D) $table, Identifier:D(Cool:D) :$as!) {
-	$table.as($as);
-}
-multi table(Table:D(Any:D) $table, Pair :$as!) {
-	$table.as($as.key, $as.value);
+multi table(Identifier(Cool) $name) {
+	Table::Simple.new(:$name);
 }
 
 sub identifier(Identifier(Cool) $ident) is export(:functions) {
