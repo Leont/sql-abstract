@@ -1,6 +1,8 @@
 Revision history for SQL-Abstract
 
 {{$NEXT}}
+
+0.0.3  2023-05-19T18:45:23+02:00
     - Split out Placeholders to SQL::Placeholders
     - Move Query to SQL::Query
 
