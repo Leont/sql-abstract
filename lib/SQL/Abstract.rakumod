@@ -1808,57 +1808,62 @@ method commit() {
 }
 
 
-multi method table(Table:D(Any:D) $table) {
+proto table(|) is export(:functions) { * }
+multi table(Table:D(Any:D) $table) {
 	$table;
 }
-multi method table(Table:D(Any:D) $table, Identifier:D(Cool:D) :$as!) {
+multi table(Table:D(Any:D) $table, Identifier:D(Cool:D) :$as!) {
 	$table.as($as);
 }
-multi method table(Table:D(Any:D) $table, Pair :$as!) {
+multi table(Table:D(Any:D) $table, Pair :$as!) {
 	$table.as($as.key, $as.value);
 }
 
-method identifier(Identifier(Cool) $ident) {
+sub identifier(Identifier(Cool) $ident) is export(:functions) {
 	$ident;
 }
 
-method identifiers(Identifiers(Any) $idents) {
+sub identifiers(Identifiers(Any) $idents) is export(:functions) {
 	$idents;
 }
 
-method binary(Str $operator, Expression $left, Expression $right, *%args) {
+sub binary(Str $operator, Expression $left, Expression $right, *%args) is export(:functions) {
 	my $class = %binary-op-for{$operator.lc}:exists ?? %binary-op-for{$operator.lc} !! die "No such operator '$operator'";
 	$class.new(:$left, :$right, |%args);
 }
 
-method logical(Str $operator, @elements) {
+sub logical(Str $operator, @elements) is export(:functions) {
 	my $class = $operator.lc eq 'and' ?? Op::And !! $operator.lc eq 'or' ?? Op::Or !! die "No such operator '$operator'";
 	$class.new(:@elements);
 }
 
-method not(Expression $expression) {
+sub not(Expression $expression) is export(:functions) {
 	Op::Not.new($expression)
 }
 
-method function(Str $name, Column::List:D(Any:D) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) {
+sub function(Str $name, Column::List:D(Any:D) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) is export(:functions) {
 	Function.new(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
 }
 
-method value(Any $value) {
+sub value(Any $value) is export(:functions) {
 	expand-expression($value);
 }
 
-method null() {
+sub null() is export(:functions) {
 	Value::Null.new;
 }
-method default() {
+sub default() is export(:functions) {
 	Value::Default.new;
 }
-method true() {
+sub true() is export(:functions) {
 	Value::True.new;
 }
-method false() {
+sub false() is export(:functions) {
 	Value::False.new;
+}
+
+my package EXPORT::functions {
+	our &delay = &SQL::Query::delay;
 }
 
 =begin pod

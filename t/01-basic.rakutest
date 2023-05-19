@@ -1,8 +1,7 @@
 #! raku
 
 use Test;
-use SQL::Query :delay;
-use SQL::Abstract;
+use SQL::Abstract :functions;
 
 sub result(Str $sql, @arguments?) {
 	SQL::Query.new($sql, @arguments);
@@ -48,7 +47,7 @@ is-deeply $select-simple10, result('SELECT bar, baz FROM my_table WHERE foo = $1
 my $select-simple11 = $abstract.select('my_table', 'bar', (:1foo, :1bar));
 is-deeply $select-simple11, result('SELECT bar FROM my_table WHERE foo = $1 AND bar = $2', [1, 1]);
 
-my $like = SQL::Abstract::Op::Like.new(:left($abstract.identifier('foo')), :right($abstract.value('foo%')), :escape($abstract.value('\\')));
+my $like = SQL::Abstract::Op::Like.new(:left(identifier('foo')), :right(value('foo%')), :escape(value('\\')));
 my $select-simple12 = $abstract.select('my_table', <bar baz>, $like);
 is-deeply $select-simple12, result('SELECT bar, baz FROM my_table WHERE foo LIKE $1 ESCAPE $2', ['foo%', '\\']);
 
@@ -137,8 +136,8 @@ my $select-funcsource1 = $abstract.select({ :function{ :name<some_function> }, :
 is-deeply $select-funcsource1, result('SELECT * FROM (some_function()) AS ranking (bar, baz)', []);
 
 
-my $when1 = SQL::Abstract::Op::Case::When.new(:condition($abstract.value("no")), :value($abstract.value(42)));
-my $select-case1 = $abstract.select('my_table', SQL::Abstract::Op::Case.new(:left($abstract.identifier('bar')), :whens[$when1], :else($abstract.value(13))), { :1foo });
+my $when1 = SQL::Abstract::Op::Case::When.new(:condition(value("no")), :value(value(42)));
+my $select-case1 = $abstract.select('my_table', SQL::Abstract::Op::Case.new(:left(identifier('bar')), :whens[$when1], :else(value(13))), { :1foo });
 is-deeply $select-case1, result('SELECT CASE bar WHEN $1 THEN $2 ELSE $3 END FROM my_table WHERE foo = $4', ['no', 42, 13, 1]);
 
 
@@ -187,7 +186,7 @@ my $select-locking2 = $abstract.select('my_table', <bar baz>, { :1foo }, :lockin
 is-deeply $select-locking2, result('SELECT bar, baz FROM my_table WHERE foo = $1 FOR UPDATE OF foo', [1]);
 
 
-my $e = $abstract.binary('<', $abstract.value(1), $abstract.logical('and', [ $abstract.value(1), $abstract.value(2)]));
+my $e = binary('<', value(1), logical('and', [ value(1), value(2)]));
 my $select-precedence1 = $abstract.select('my_table', <bar baz>, $e);
 is-deeply $select-precedence1, result('SELECT bar, baz FROM my_table WHERE $1 < ($2 AND $3)', [1, 1, 2]);
 
@@ -220,11 +219,11 @@ is-deeply $select-join4, result('SELECT bar, baz FROM my_table CROSS JOIN other_
 
 
 my $select-other = SQL::Abstract::Select.create(:source<other_table>);
-my $select-sub1-any = SQL::Abstract::Op::In::Query.new(:left($abstract.identifier('foo')), :query($select-other));
+my $select-sub1-any = SQL::Abstract::Op::In::Query.new(:left(identifier('foo')), :query($select-other));
 my $select-sub1 = $abstract.select('my_table', <bar baz>, $select-sub1-any);
 is-deeply $select-sub1, result('SELECT bar, baz FROM my_table WHERE foo IN (SELECT * FROM other_table)', []);
 
-my $select-sub2-any = SQL::Abstract::Op::Exists.new(:left($abstract.identifier('foo')), :query($select-other));
+my $select-sub2-any = SQL::Abstract::Op::Exists.new(:left(identifier('foo')), :query($select-other));
 my $select-sub2 = $abstract.select('my_table', <bar baz>, $select-sub2-any);
 is-deeply $select-sub2, result('SELECT bar, baz FROM my_table WHERE foo EXISTS (SELECT * FROM other_table)', []);
 
@@ -254,7 +253,7 @@ is-deeply $insert7, result('INSERT INTO my_table (bar, baz) SELECT bar, baz FROM
 my $insert8 = $abstract.insert((:alias<my_table>), { bar => 1, baz => 43 });
 is-deeply $insert8, result('INSERT INTO my_table AS alias (bar, baz) VALUES ($1, $2)', [1, 43]);
 
-my $insert9 = $abstract.insert('my_table', SQL::Abstract::Value::Default);
+my $insert9 = $abstract.insert('my_table', default);
 is-deeply $insert9, result('INSERT INTO my_table DEFAULT VALUES', []);
 
 my $insert10 = $abstract.insert('my_table', { bar => 1, baz => 43 }, :overriding<system>);
@@ -263,7 +262,7 @@ is-deeply $insert10, result('INSERT INTO my_table (bar, baz) OVERRIDING SYSTEM V
 my $insert11 = $abstract.insert('my_table', List, [ [ 1, 42 ], ]);
 is-deeply $insert11, result('INSERT INTO my_table VALUES ($1, $2)', [1, 42]);
 
-my $insert12 = $abstract.insert('my_table', { bar => SQL::Abstract::Value::Default, baz => 43 });
+my $insert12 = $abstract.insert('my_table', { bar => default, baz => 43 });
 is-deeply $insert12, result('INSERT INTO my_table (bar, baz) VALUES (DEFAULT, $1)', [43]);
 
 
@@ -285,7 +284,7 @@ is-deeply $update5, result('UPDATE my_table SET bar = bar + $1, baz = $2 WHERE q
 my $update6 = $abstract.update('my_table', { bar => 1, baz => 42 }, { quz => 13 }, :from<other>);
 is-deeply $update6, result('UPDATE my_table SET bar = $1, baz = $2 FROM other WHERE quz = $3', [1, 42, 13]);
 
-my $update7-columns = $abstract.identifiers(<bar baz>);
+my $update7-columns = identifiers(<bar baz>);
 my $update7-select = SQL::Abstract::Select.create(:source<other_table>, :where{ :bar{ '>' => 3 } });
 my $update7 = $abstract.update('my_table', :{ $update7-columns => $update7-select }, { quz => 13 });
 is-deeply $update7, result('UPDATE my_table SET (bar, baz) = (SELECT * FROM other_table WHERE bar > $1) WHERE quz = $2', [3, 13]);
@@ -338,28 +337,28 @@ is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
 
 my $conditional1 = SQL::Abstract::Conditions.COERCE((:1id));
 isa-ok $conditional1.expression, SQL::Abstract::Op::Equals;
-is $conditional1.expression.left, $abstract.identifier('id');
-cmp-ok $conditional1.expression.left, '===', $abstract.identifier('id');
-is-deeply $conditional1.expression.right, $abstract.value(1);
+is $conditional1.expression.left, identifier('id');
+cmp-ok $conditional1.expression.left, '===', identifier('id');
+is-deeply $conditional1.expression.right, value(1);
 
 my $conditional2 = SQL::Abstract::Conditions.COERCE((:other(1|2)));
 isa-ok $conditional2.expression, SQL::Abstract::Op::In;
-is-deeply $conditional2.expression.left, $abstract.identifier('other');
-is-deeply $conditional2.expression.elements[0], $abstract.value(1);
-is-deeply $conditional2.expression.elements[1], $abstract.value(2);
+is-deeply $conditional2.expression.left, identifier('other');
+is-deeply $conditional2.expression.elements[0], value(1);
+is-deeply $conditional2.expression.elements[1], value(2);
 
 my $conditional3 = $conditional1.merge($conditional2);
 isa-ok $conditional3.expression, SQL::Abstract::Op::And;
 isa-ok $conditional3.expression.elements[0], SQL::Abstract::Op::Equals;
 isa-ok $conditional3.expression.elements[1], SQL::Abstract::Op::In;
 
-my $conditional4 = SQL::Abstract::Join::Conditions.from-using($abstract.table('left'), $abstract.table('right'), $abstract.identifiers(<shared shared2>));
+my $conditional4 = SQL::Abstract::Join::Conditions.from-using(table('left'), table('right'), identifiers(<shared shared2>));
 isa-ok $conditional4.expression, SQL::Abstract::Op::And;
 isa-ok $conditional4.expression.elements[0], SQL::Abstract::Op::Equals;
-is-deeply $conditional4.expression.elements[0].left, $abstract.identifier('left.shared');
-is-deeply $conditional4.expression.elements[0].right, $abstract.identifier('right.shared');
+is-deeply $conditional4.expression.elements[0].left, identifier('left.shared');
+is-deeply $conditional4.expression.elements[0].right, identifier('right.shared');
 isa-ok $conditional4.expression.elements[1], SQL::Abstract::Op::Equals;
-is-deeply $conditional4.expression.elements[1].left, $abstract.identifier('left.shared2');
-is-deeply $conditional4.expression.elements[1].right, $abstract.identifier('right.shared2');
+is-deeply $conditional4.expression.elements[1].left, identifier('left.shared2');
+is-deeply $conditional4.expression.elements[1].right, identifier('right.shared2');
 
 done-testing;
