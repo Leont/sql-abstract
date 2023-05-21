@@ -216,7 +216,12 @@ This creates a new `SQL::Abstract` object. It has one mandatory name argument, `
 
     This will use Postgres style `($1, $2)` placeholders.
 
-### select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset)
+select
+------
+
+```raku
+method select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$prepare)
+```
 
 This will generate a `SELECT` query. It will select `$columns` from `$source`, filtering by $conditions. 
 
@@ -226,27 +231,27 @@ my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost{ '<
 # SELECT books.name, authors.name FROM books INNER JOIN authors USING (author_id) WHERE cost < 10
 
 my @columns = [ 'name', :sum{ :function<count>, :arguments(*) } ];
-$abstract.select('artists', @columns, { :name(:like('A%')) }, :group-by<name>, :order-by(:sum<desc>));
+my $counts = $$abstract.select('artists', @columns, { :name(like => 'A%') }, :group-by<name>, :order-by(:sum<desc>));
 # SELECT name, COUNT(*) as sum FROM artists WHERE name LIKE 'A%' GROUP BY name ORDER BY sum DESC
 ```
 
-### update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
+update
+------
+
+```raku
+method update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
+```
 
 This will update `$target` by assigning the columns and values from `$set` if they match `$where`, returning `$returning`.
 
-### insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
+insert
+------
 
-Insert into `$target`, assigning each of the values in Rows to a new row in the table.
+### Hash insertion
 
 ```raku
-$abstract.insert('artists', ['name'], [ [ 'Metallica'], ], :returning(*));
-# INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
-
-$abstract.insert('artists', List, [ [ 'Metallica'], ], :returning(*));
-# INSERT INTO artists VALUES ('Metallica') RETURNING *
+method insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
 ```
-
-### insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
 
 Inserts the values in `$values` into the table `$target`, returning the columns in `$returning`
 
@@ -255,14 +260,40 @@ $abstract.insert('artists', { :name<Metallica> }, :returning(*));
 # INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
 ```
 
-### insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
+### List insertions
+
+```raku
+insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
+```
+
+Insert into `$target`, assigning each of the values in Rows to a new row in the table. This way one can insert a multitude of rows into a table.
+
+```raku
+$abstract.insert('artists', ['name'], [ [ 'Metallica'], ['Motörhead'] ], :returning(*));
+# INSERT INTO artists (name) VALUES ('Metallica'), ('Motörhead') RETURNING *
+
+$abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
+# INSERT INTO artists VALUES ('Metallica') RETURNING id
+```
+
+### Select insertion
+
+insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
+----------------------------------------------------------------------------------------------------
 
 ```raku
 $abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
 # INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
 ```
 
-### delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
+
+
+
+```raku
+delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
+```
+
+This deletes rows from the database, optionally returning their values.
 
 ```raku
 $abstract.delete('artists', { :name<Madonna> });
