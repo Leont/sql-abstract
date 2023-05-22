@@ -1,5 +1,7 @@
 unit package SQL;
 
+use SQL::Query;
+
 role Placeholders:ver<0.0.3>:auth<zef:leont> {
 	has @.values is built(False);
 	method bind(Any $value) { ... }
@@ -13,9 +15,18 @@ class Placeholders::DBI does Placeholders {
 }
 
 class Placeholders::Postgres does Placeholders {
-	method bind(Any $value --> Str) {
+	has Str %!names;
+	multi method bind(Any $value --> Str) {
 		@!values.push($value);
 		'$' ~ +@!values;
+	}
+	multi method bind(SQL::Query::Delegate $value --> Str) {
+		if not $value.has-default and %!names{$value.identifier} -> $placeholder {
+			$placeholder;
+		} else {
+			@!values.push($value);
+			%!names{$value.identifier} = '$' ~ +@!values;
+		}
 	}
 }
 
