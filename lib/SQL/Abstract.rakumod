@@ -792,15 +792,18 @@ class Locking {
 	enum Strength (:Update<update> :NoKeyUpdate('no key update') :Share<share> :KeyShare('key share'));
 
 	has Strength:D $.strength is required;
-	has Identifier $.table;
+	has Identifiers $.tables;
 	has Bool $.no-wait;
 	has Bool $.skip-locked;
 
 	multi method COERCE(Strength(Str) $strength) {
 		self.new(:$strength);
 	}
-	multi method COERCE(Pair (Strength(Str) :$key, Identifier(Cool) :$value)) {
-		self.new(:strength($key), :table($value));
+	multi method COERCE(Pair (Strength(Str) :$key, Identifiers(Cool) :$value)) {
+		self.new(:strength($key), :tables($value));
+	}
+	multi method COERCE(Map (Strength(Str) :$strength, Identifiers(Cool) :$tables, Bool :$no-wait, Bool :$skip-locked?)) {
+		self.new(:$strength, :$tables, :$no-wait, :$skip-locked);
 	}
 }
 
@@ -1457,6 +1460,10 @@ class Renderer::SQL does Renderer {
 		Empty;
 	}
 
+	multi method render-names(Identifiers:D $columns --> Str) {
+		$columns.elements.map({ self.render-identifier($^column) }).join(', ');
+	}
+
 	multi method render-identifiers(Identifiers:D $columns --> Str) {
 		parenthesize-list($columns.elements.map({ self.render-identifier($^column) }), ', ');
 	}
@@ -1613,8 +1620,8 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-locking(Locking:D $locking --> List) {
-		my @result = 'FOR', $locking.strength.uc;
-		@result.push('OF', self.render-identifier($locking.table)) with $locking.table;
+		my @result = 'FOR', $locking.strength.Str.uc;
+		@result.push('OF', self.render-names($locking.tables)) with $locking.tables;
 		@result.push('NOWAIT') if $locking.no-wait;
 		@result.push('SKIP LOCKED') if $locking.skip-locked;
 		@result;

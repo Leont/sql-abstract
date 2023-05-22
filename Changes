@@ -1,6 +1,7 @@
 Revision history for SQL-Abstract
 
 {{$NEXT}}
+    - Allow locking clause to specify multiple tables
 
 0.0.3  2023-05-19T18:45:23+02:00
     - Split out Placeholders to SQL::Placeholders
