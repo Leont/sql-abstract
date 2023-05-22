@@ -167,11 +167,12 @@ class Column::List does Value::List {
 	multi to-column(Identifier(List) $column) {
 		$column;
 	}
+	multi to-column(Pair $ (:$key, Pair :$value)) {
+		my $function = Function.COERCE({ :name($value.key), :arguments($value.value) });
+		Expression::Renamed.COERCE($key => $function);
+	}
 	multi to-column(Pair $ (:$key, :$value)) {
 		Expression::Renamed.COERCE($key => to-column($value));
-	}
-	multi to-column(Pair (:$key, Bool :$value)) {
-		Identifier.new($key);
 	}
 	multi to-column(Whatever) {
 		Identifier.new('*');
