@@ -306,8 +306,11 @@ is-deeply $delete2, result('DELETE FROM my_table WHERE foo < $1 RETURNING baz', 
 my $delete3 = $abstract.delete('my_table', { :foo('<' => 3) }, :using<baz>);
 is-deeply $delete3, result('DELETE FROM my_table USING baz WHERE foo < $1', [3]);
 
-my $delete4 = $abstract.delete('my_table', \'CURRENT OF cursor_name', :using<baz>);
+my $delete4 = $abstract.delete('my_table', current('cursor_name'), :using<baz>);
 is-deeply $delete4, result('DELETE FROM my_table USING baz WHERE CURRENT OF cursor_name', []);
+
+my $delete5 = $abstract.delete('my_table', \'CURRENT OF cursor_name', :using<baz>);
+is-deeply $delete5, result('DELETE FROM my_table USING baz WHERE CURRENT OF cursor_name', []);
 
 
 my $values1 = $abstract.values([[1, 2],], :1limit);

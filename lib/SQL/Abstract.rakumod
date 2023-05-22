@@ -448,6 +448,11 @@ class Op::Case does Expression {
 	has Expression $.else;
 }
 
+class Current does Expression {
+	method precedence(--> Precedence::Between) {}
+	has Identifier:D $.cursor is required;
+}
+
 role Conditional {
 	has Expression:D $.expression is required;
 
@@ -1418,6 +1423,10 @@ class Renderer::SQL does Renderer {
 		my $output = self.render-identifier($column.alias);
 		"$input AS $output";
 	}
+	multi method render-expression(Placeholders $placeholders, Current $current, Precedence --> Str) {
+		my $cursor = self.render-identifier($current.cursor);
+		"CURRENT OF $cursor";
+	}
 
 	multi method render-quantifier(Quantifier:D $quantifier) {
 		$quantifier.uc;
@@ -1923,6 +1932,10 @@ sub true() is export(:functions) {
 }
 sub false() is export(:functions) {
 	Value::False.new;
+}
+
+sub current(Identifier(Cool) $cursor) is export(:functions) {
+	Current.new(:$cursor);
 }
 
 my package EXPORT::functions {
