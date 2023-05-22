@@ -1086,18 +1086,30 @@ class Conflict::Update does Conflict {
 	has Conditions $.where;
 }
 
+class Conflicts {
+	has Conflict @.conflicts;
+
+	multi method COERCE(@specs) {
+		my Conflict(Any) @conflicts = @specs;
+		self.new(:@conflicts);
+	}
+	multi method COERCE(Conflict(Any) $conflict) {
+		self.new(:conflicts[ $conflict ]);
+	}
+}
+
 role Insert does Query::Common {
 	has Table:D      $.target is required;
 	has Identifiers  $.columns;
 	has Overriding   $.overriding;
-	has Conflict     $.conflict;
+	has Conflicts    $.conflicts;
 	has Column::List $.returning;
 }
 
 class Insert::Values does Insert {
 	has Rows:D $.rows is required;
 
-	method create(Table(Any) :$target, Identifiers(Cool) :$columns, Rows:D(List:D) :$rows, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+	method create(Table(Any) :$target, Identifiers(Cool) :$columns, Rows:D(List:D) :$rows, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
 		Insert::Values.new(:$target, :$columns, :$rows, :$overriding, :$conflicts, :$returning);
 	}
 }
@@ -1105,14 +1117,14 @@ class Insert::Values does Insert {
 class Insert::Select does Insert {
 	has Select:D $.select is required;
 
-	method create(Table(Any) :$target, Identifiers(Cool) :$columns, Select(Map) :$select, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+	method create(Table(Any) :$target, Identifiers(Cool) :$columns, Select(Map) :$select, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
 		Insert::Select.new(:$target, :$columns, :$select, :$overriding, :$conflicts, :$returning);
 	}
 }
 
 class Insert::Defaults does Insert {
-	method create(Table(Any) :$target,  Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-		Insert::Defaults.new(:$target, :$overriding, :$conflict, :$returning);
+	method create(Table(Any) :$target,  Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+		Insert::Defaults.new(:$target, :$overriding, :$conflicts, :$returning);
 	}
 }
 
@@ -1738,7 +1750,11 @@ class Renderer::SQL does Renderer {
 		@result.push: self.render-conditions($placeholders, $conflict.where);
 		@result;
 	}
-	multi method render-conflict(Placeholders $placeholders, Conflict:U $conflict) {
+
+	multi method render-conflicts(Placeholders $placeholders, Conflicts:D $conflicts) {
+		$conflicts.conflicts.flatmap: { self.render-conflict($placeholders, $^conflict) };
+	}
+	multi method render-conflicts(Placeholders $placeholders, Conflicts:U $conflict) {
 		Empty;
 	}
 
@@ -1748,10 +1764,10 @@ class Renderer::SQL does Renderer {
 		my @columns    = self.render-identifiers($insert.columns);
 		my @overriding = self.render-overriding($insert.overriding);
 		my @content    = self.render-insert-content($placeholders, $insert);
-		my @conflict   = self.render-conflict($placeholders, $insert.conflict);
+		my @conflicts  = self.render-conflicts($placeholders, $insert.conflicts);
 		my @returning  = self.render-column-expressions($placeholders, $insert.returning, 'RETURNING');
 
-		(@common, 'INSERT INTO', @target, @columns, @overriding, @content, @conflict, @returning).flat.join(' ');
+		(@common, 'INSERT INTO', @target, @columns, @overriding, @content, @conflicts, @returning).flat.join(' ');
 	}
 
 	multi method render-expression(Placeholders $placeholders, Delete $delete, Precedence) {
@@ -1812,17 +1828,17 @@ method update(|args) {
 }
 
 proto insert(|) is export(:functions) { * }
-multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Rows:D(List:D) $rows, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	Insert::Values.new(:$common-tables, :$target, :$columns, :$rows, :$overriding, :$conflict, :$returning);
+multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Rows:D(List:D) $rows, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	Insert::Values.new(:$common-tables, :$target, :$columns, :$rows, :$overriding, :$conflicts, :$returning);
 }
-multi insert(Table:D(Any) $target, Assigns:D(Any) $values, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	samewith($target, $values.keys, [$values.values,], :$common-tables, :$overriding, :$conflict, :$returning);
+multi insert(Table:D(Any) $target, Assigns:D(Any) $values, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	samewith($target, $values.keys, [$values.values,], :$common-tables, :$overriding, :$conflicts, :$returning);
 }
-multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	Insert::Select.new(:$common-tables, :$target, :$columns, :$select, :$overriding, :$conflict, :$returning);
+multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	Insert::Select.new(:$common-tables, :$target, :$columns, :$select, :$overriding, :$conflicts, :$returning);
 }
-multi insert(Table:D(Any) $target, Value::Default $, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-	Insert::Defaults.new(:$common-tables, :$target, :$overriding, :$conflict, :$returning);
+multi insert(Table:D(Any) $target, Value::Default $, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	Insert::Defaults.new(:$common-tables, :$target, :$overriding, :$conflicts, :$returning);
 }
 
 method insert(|args) {

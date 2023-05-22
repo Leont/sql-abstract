@@ -241,10 +241,10 @@ is-deeply $insert3, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2), ($3
 my $insert4 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :returning<bar baz>);
 is-deeply $insert4, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) RETURNING bar, baz', [1, 42]);
 
-my $insert5 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict({ :target(:columns<bar>), :do{ bar => 2 } }));
+my $insert5 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflicts(<bar> => { bar => 2 }));
 is-deeply $insert5, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT (bar) DO UPDATE SET bar = $3', [1, 42, 2]);
 
-my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflict({ :do<nothing> }));
+my $insert6 = $abstract.insert('my_table', { bar => 1, baz => 42 }, :conflicts<nothing>);
 is-deeply $insert6, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT DO NOTHING', [1, 42]);
 
 my $insert7 =  $abstract.insert('my_table', <bar baz>, { :source<other_table>, :columns<bar baz>, :where{ :foo('>' => 3) } });

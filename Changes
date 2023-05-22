@@ -4,6 +4,7 @@ Revision history for SQL-Abstract
     - Allow locking clause to specify multiple tables
     - Allow multiple locking clauses in Select
     - Add pair-pair converter for column
+    - Allow for multiple upsert clauses
 
 0.0.3  2023-05-19T18:45:23+02:00
     - Split out Placeholders to SQL::Placeholders
