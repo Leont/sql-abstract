@@ -1939,7 +1939,7 @@ sub current(Identifier(Cool) $cursor) is export(:functions) {
 }
 
 my package EXPORT::functions {
-	our &delay = &SQL::Query::delay;
+	our &delegate = &SQL::Query::delegate;
 }
 
 =begin pod

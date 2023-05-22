@@ -2,7 +2,7 @@ use v6;
 
 unit class SQL::Query:ver<0.0.3>:auth<zef:leont>;
 
-class Delayed {
+class Delegate {
 	has Str:D $.identifier is required;
 	has Any $.default is default(Nil);
 	has Any:U $.type;
@@ -20,19 +20,19 @@ method new(Str:D $sql, @arguments?) {
 }
 
 method type-hints() {
-	@!arguments.map: { $^value ~~ Delayed ?? $value.type !! $value.WHAT };
+	@!arguments.map: { $^value ~~ Delegate ?? $value.type !! $value.WHAT };
 }
 
 multi resolve-value(Any $value, %replacements) {
 	$value;
 }
-multi resolve-value(Delayed $delayed, %replacements) {
-	if %replacements{$delayed.identifier}:exists {
-		%replacements{$delayed.identifier};
-	} elsif $delayed.has-default {
-		$delayed.default;
+multi resolve-value(Delegate $delegate, %replacements) {
+	if %replacements{$delegate.identifier}:exists {
+		%replacements{$delegate.identifier};
+	} elsif $delegate.has-default {
+		$delegate.default;
 	} else {
-		die "No value given for delayed value '$delayed.identifier()'"
+		die "No value given for delegate value '$delegate.identifier()'"
 	}
 }
 
@@ -41,15 +41,15 @@ method resolve(%replacements?) {
 }
 
 method identifiers() {
-	@!arguments.grep(Delayed)».identifier;
+	@!arguments.grep(Delegate)».identifier;
 }
 
-method has-delayed(--> Bool) {
-	so any(@!arguments) ~~ Delayed;
+method has-delegate(--> Bool) {
+	so any(@!arguments) ~~ Delegate;
 }
 
-our sub delay(Str:D $identifier, Any $default = Nil, Any:U :$type = $default.WHAT) is export(:delay) {
-	Delayed.new(:$identifier, :$default, :$type);
+our sub delegate(Str:D $identifier, Any $default = Nil, Any:U :$type = $default.WHAT) is export(:delegate) {
+	Delegate.new(:$identifier, :$default, :$type);
 }
 
 =begin pod
@@ -62,8 +62,8 @@ SQL::Query - An SQL query with it's arguments
 
 =begin code :lang<raku>
 
-use SQL::Query :delay;
-my $query = SQL::Query.new('SELECT ...', [1, 2, delay('foo')]);
+use SQL::Query :delegate;
+my $query = SQL::Query.new('SELECT ...', [1, 2, delegate('foo')]);
 my $sth = $dbh.prepare($query);
 for 3..5 -> $foo {
 	$sth.execute($query.resolve({ :$foo }));
@@ -87,29 +87,29 @@ This returns the SQL portion of the query.
 
 =head2 arguments(--> List)
 
-This returns the argument list without resolving any delayed values.
+This returns the argument list without resolving any delegate values.
 
 =head2 resolve(%replacements --> List)
 
-This resolves the delayed arguments in the list using C<%replacements> and returns the result.
+This resolves the delegate arguments in the list using C<%replacements> and returns the result.
 
 =head2 identifiers(--> List)
 
-This returns all identifiers of delayed arguments.
+This returns all identifiers of delegate arguments.
 
 =head2 type-hints(--> List)
 
 This returns the expected types for the arguments.
 
-=head2 has-delayed(--> Bool)
+=head2 has-delegate(--> Bool)
 
-This returns true if any argument is delayed.
+This returns true if any argument is delegate.
 
-=head1 delayed values
+=head1 delegate values
 
-A delayed value can be using the C<delay> function.
+A delegate value can be using the C<delegate> function.
 
-=head2 delay(Str:D $identifier, Any $default?, Any:U :$type --> SQL::Query::Delayed)
+=head2 delegate(Str:D $identifier, Any $default?, Any:U :$type --> SQL::Query::Delegate)
 
 This takes an identifier that is later used to map the value to its substitution. It optionally takes a default value in case no substitution is provided.
 

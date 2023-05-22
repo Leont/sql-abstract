@@ -322,16 +322,16 @@ my $prepared1 = result('', [1, 2, 3]);
 is-deeply $prepared1.resolve, (1, 2, 3);
 is-deeply $prepared1.type-hints, (Int, Int, Int);
 
-my $prepared2 = result('', [1, 2, delay('foo')]);
+my $prepared2 = result('', [1, 2, delegate('foo')]);
 dies-ok { $prepared2.resolve };
 is-deeply $prepared2.type-hints, (Int, Int, Any);
 is-deeply $prepared2.resolve({ :3foo }), (1, 2, 3);
 is-deeply $prepared2.identifiers, ('foo',);
 
-my $prepared3 = result('', [1, 2, delay('foo', :type(Int))]);
+my $prepared3 = result('', [1, 2, delegate('foo', :type(Int))]);
 is-deeply $prepared3.type-hints, (Int, Int, Int);
 
-my $prepared4 = result('', [1, 2, delay('foo', 3)]);
+my $prepared4 = result('', [1, 2, delegate('foo', 3)]);
 is-deeply $prepared4.type-hints, (Int, Int, Int);
 is-deeply $prepared4.resolve, (1, 2, 3);
 is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
