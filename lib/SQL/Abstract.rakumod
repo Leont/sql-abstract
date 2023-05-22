@@ -161,7 +161,7 @@ class Column::List does Value::List {
 	multi to-column(Expression $column) {
 		$column;
 	}
-	multi to-column(Identifier(Str) $column) {
+	multi to-column(Identifier(Str) $column) is default {
 		$column;
 	}
 	multi to-column(Identifier(List) $column) {
@@ -576,10 +576,10 @@ class Order::Modifier does Expression {
 		self.new(:$column, :$order);
 	}
 	multi method COERCE(Map (Expression:D :$column, Sorting(Str) :$order, Nulls(Str) :$nulls)) {
-		self.new(:$column, :$order, :$nulls)
+		self.new(:$column, :$order, :$nulls);
 	}
 	multi method COERCE(Map (Identifier:D(Cool:D) :$column, Sorting(Str) :$order, Nulls(Str) :$nulls)) {
-		self.new(:$column, :$order, :$nulls)
+		self.new(:$column, :$order, :$nulls);
 	}
 }
 
@@ -691,7 +691,7 @@ class Function does Expression {
 		Window::Function.new(:function(self), :$window);
 	}
 
-	method as(Identifier:D(Cool:D) $alias, Identifiers(Any) $columns?, Bool :$lateral, Bool :$ordinal) {
+	method as(Identifier:D(Cool:D) $alias, Identifiers(Cool) $columns?, Bool :$lateral, Bool :$ordinal) {
 		Source::Function.new(:function(self), :$alias, :$columns, :$lateral, :$ordinal);
 	}
 }
@@ -825,7 +825,7 @@ class Select { ... }
 
 class Compound {
 	enum Type <Union Intersect Except>;
-	has Type:D $.type = Union;
+	has Type:D $.type = Type::Union;
 	has Bool $.all;
 	has Select $.next;
 
@@ -900,7 +900,7 @@ class Common {
 		multi method COERCE(Identifier:D(Cool:D) $name) {
 			self.new(:$name);
 		}
-		multi method COERCE(Pair $pair (Identifier(Cool) :key($name), Identifiers(Any) :value($columns))) {
+		multi method COERCE(Pair $pair (Identifier(Cool) :key($name), Identifiers(Cool) :value($columns))) {
 			self.new(:$name, :$columns);
 		}
 	}
@@ -908,7 +908,7 @@ class Common {
 		has Name:D $.alias is required;
 		has Query:D $.query is required;
 
-		multi method COERCE(Pair $pair (Name:D(Any:D) :key($alias), Select:D(Hash:D) :value($query))) {
+		multi method COERCE(Pair $pair (Name:D(Any:D) :key($alias), Select:D(Map:D) :value($query))) {
 			self.new(:$alias, :$query);
 		}
 		multi method COERCE(Pair $pair (Name:D(Any:D) :key($alias), Table:D(Str:D) :value($source))) {
@@ -984,7 +984,7 @@ class GroupBy {
 	multi method COERCE(Column::List $elements) {
 		self.new(:elements($elements.elements));
 	}
-	multi method COERCE(Hash $ (Bool :$all, :@elements)) {
+	multi method COERCE(Map $ (Bool :$all, :@elements)) {
 		self.new(:$all, :elements(@elements.map(&to-grouping)));
 	}
 }
@@ -1033,7 +1033,7 @@ role Conflict::Target {
 	multi method COERCE(Identifiers(Cool) $columns) {
 		Conflict::Target::Columns.new(:$columns);
 	}
-	multi method COERCE(Pair (:$key where 'columns', Identifiers:D(Any:D) :$value)) {
+	multi method COERCE(Pair (:$key where 'columns', Identifiers:D(Cool:D) :$value)) {
 		Conflict::Target::Columns.new(:columns($value));
 	}
 	multi method COERCE(Pair (:$key where 'columns', Map :value($) (Identifiers:D(Any:D) :$columns, Conditions(Any) :$where))) {
@@ -1097,16 +1097,16 @@ role Insert does Query::Common {
 class Insert::Values does Insert {
 	has Rows:D $.rows is required;
 
-	method create(Table(Any) :$target, Identifiers(Any) :$columns, Rows:D(List:D) :$rows, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-		Insert::Values.new(:$target, :$columns, :$rows, :$overriding, :$conflict, :$returning);
+	method create(Table(Any) :$target, Identifiers(Cool) :$columns, Rows:D(List:D) :$rows, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+		Insert::Values.new(:$target, :$columns, :$rows, :$overriding, :$conflicts, :$returning);
 	}
 }
 
 class Insert::Select does Insert {
 	has Select:D $.select is required;
 
-	method create(Table(Any) :$target, Identifiers(Any) :$columns, Select(Map) :$select, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
-		Insert::Select.new(:$target, :$columns, :$select, :$overriding, :$conflict, :$returning);
+	method create(Table(Any) :$target, Identifiers(Cool) :$columns, Select(Map) :$select, Overriding(Str) :$overriding, Conflict(Any) :$conflict, Column::List(Any) :$returning) {
+		Insert::Select.new(:$target, :$columns, :$select, :$overriding, :$conflicts, :$returning);
 	}
 }
 
@@ -1159,16 +1159,16 @@ role Source {
 		Source::Function.new(:$function, :alias($key));
 	}
 	
-	multi method COERCE(Map (Identifier:D(Cool:D) :table($name)!, Identifier() :$alias!, Identifiers() :$columns, Bool :$only)) {
+	multi method COERCE(Map (Identifier:D(Cool:D) :table($name), Identifier:D(Cool:D) :$alias, Identifiers(Cool) :$columns, Bool :$only)) {
 		Table::Renamed.new(:$name, :$alias, :$columns, :$only);
 	}
 	multi method COERCE(Map (Identifier:D(Cool:D) :table($name)!, Bool :$only)) {
 		Table::Simple.new(:$name, :$only);
 	}
-	multi method COERCE(Map (Function:D(Map) :$function!, Identifier() :$alias!, Identifiers() :$columns, Bool :$lateral, Bool :$ordinal)) {
+	multi method COERCE(Map (Function:D(Map:D) :$function, Identifier:D(Cool:D) :$alias, Identifiers() :$columns, Bool :$lateral, Bool :$ordinal)) {
 		Source::Function.new(:$function, :$alias, :$columns, :$lateral, :$ordinal);
 	}
-	multi method COERCE(Map (Select(Map) :$query!, Identifier:D(Cool:D) :$alias!, Identifiers() :$columns, Bool :$lateral)) {
+	multi method COERCE(Map (Select:D(Map:D) :$query, Identifier:D(Cool:D) :$alias, Identifiers() :$columns, Bool :$lateral)) {
 		Source::Query.new(:query($query), :$alias, :$columns, :$lateral);
 	}
 	multi method COERCE(Map (Source:D(Any:D) :$left!, Source:D(Any:D) :$right!, *%args)) {
@@ -1495,7 +1495,7 @@ class Renderer::SQL does Renderer {
 		Empty;
 	}
 
-	multi method render-source-alias(Source::Aliased $source) {
+	method render-source-alias(Source::Aliased $source) {
 		my $alias = self.render-identifier($source.alias);
 		my @columns = self.render-identifiers($source.columns);
 		'AS', $alias, |@columns;
@@ -1566,11 +1566,11 @@ class Renderer::SQL does Renderer {
 		Empty;
 	}
 
-	method render-common-table(Placeholders $placeholders, Common::Rename $rename --> List) {
+	method render-common-table(Placeholders $placeholders, Common::Rename $rename --> Str) {
 		my $alias      = self.render-identifier($rename.alias.name);
 		my @columns    = self.render-identifiers($rename.alias.columns);
 		my $expression = self.render-expression($placeholders, $rename.query, Precedence::Comma);
-		$alias, 'AS', $expression;
+		"$alias AS $expression";
 	}
 
 	multi method render-common-tables(Placeholders $placeholders, Common:D $common --> List) {
@@ -1804,7 +1804,7 @@ method select(|args) {
 
 sub update(Table:D(Any:D) $target, Assigns:D(Any:D) $assigns, Conditions(Any) $where?, Common(Any) :$common-tables, Source(Any) :$from, Column::List(Any) :$returning) is export(:functions) {
 	my @assignments = $assigns.assignments;
-	my $update = Update.new(:$common-tables, :$target, :@assignments, :$where, :$from, :$returning);
+	Update.new(:$common-tables, :$target, :@assignments, :$where, :$from, :$returning);
 }
 
 method update(|args) {

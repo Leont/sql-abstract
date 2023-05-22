@@ -49,7 +49,7 @@ method has-delayed(--> Bool) {
 }
 
 our sub delay(Str:D $identifier, Any $default = Nil, Any:U :$type = $default.WHAT) is export(:delay) {
-    Delayed.new(:$identifier, :$default, :$type);
+	Delayed.new(:$identifier, :$default, :$type);
 }
 
 =begin pod
