@@ -1029,6 +1029,9 @@ class Conflict::Target::Columns { ... }
 class Conflict::Target::Constraint { ... }
 
 role Conflict::Target {
+	multi method COERCE(Identifiers(Cool) $columns) {
+		Conflict::Target::Columns.new(:$columns);
+	}
 	multi method COERCE(Pair (:$key where 'columns', Identifiers:D(Any:D) :$value)) {
 		Conflict::Target::Columns.new(:columns($value));
 	}
@@ -1059,10 +1062,17 @@ role Conflict {
 	multi method COERCE('nothing') {
 		Conflict::Nothing.new;
 	}
-	multi method COERCE(Map (Conflict::Target(Pair) :$target?, Str:D :$do! where 'nothing')) {
+	multi method COERCE(Pair (Conflict::Target:D(Any) :$key, Str:D :$value where 'nothing')) {
+		Conflict::Noting.new(:target($key));
+	}
+	multi method COERCE(Pair (Conflict::Target:D(Any) :$key, Assigns:D(Any:D) :$value)) {
+		my @assignments = $value.assignments;
+		Conflict::Update.new(:target($key), :@assignments);
+	}
+	multi method COERCE(Map (Conflict::Target(Any) :$target?, Str:D :$do! where 'nothing')) {
 		Conflict::Nothing.new(:$target);
 	}
-	multi method COERCE(Map (Conflict::Target:D(Pair) :$target!, Assigns:D(Any:D) :$do!, Conditions(Any) :$where)) {
+	multi method COERCE(Map (Conflict::Target:D(Any) :$target!, Assigns:D(Any:D) :$do!, Conditions(Any) :$where)) {
 		my @assignments = $do.assignments;
 		Conflict::Update.new(:$target, :@assignments, :$where);
 	}
