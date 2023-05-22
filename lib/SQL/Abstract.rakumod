@@ -791,19 +791,32 @@ class Window::Function does Expression {
 class Locking {
 	enum Strength (:Update<update> :NoKeyUpdate('no key update') :Share<share> :KeyShare('key share'));
 
-	has Strength:D $.strength is required;
-	has Identifiers $.tables;
-	has Bool $.no-wait;
-	has Bool $.skip-locked;
+	class Clause {
 
-	multi method COERCE(Strength(Str) $strength) {
-		self.new(:$strength);
+		has Strength:D $.strength is required;
+		has Identifiers $.tables;
+		has Bool $.no-wait;
+		has Bool $.skip-locked;
+
+		multi method COERCE(Strength(Str) $strength) {
+			self.new(:$strength);
+		}
+		multi method COERCE(Pair (Strength(Str) :$key, Identifiers(Cool) :$value)) {
+			self.new(:strength($key), :tables($value));
+		}
+		multi method COERCE(Map (Strength(Str) :$strength, Identifiers(Cool) :$tables, Bool :$no-wait, Bool :$skip-locked?)) {
+			self.new(:$strength, :$tables, :$no-wait, :$skip-locked);
+		}
 	}
-	multi method COERCE(Pair (Strength(Str) :$key, Identifiers(Cool) :$value)) {
-		self.new(:strength($key), :tables($value));
+
+	has Clause @.lockings;
+
+	multi method COERCE(@specs) {
+		my Clause(Any) @lockings = @specs;
+		self.new(:@lockings);
 	}
-	multi method COERCE(Map (Strength(Str) :$strength, Identifiers(Cool) :$tables, Bool :$no-wait, Bool :$skip-locked?)) {
-		self.new(:$strength, :$tables, :$no-wait, :$skip-locked);
+	multi method COERCE(Clause(Any) $locking) {
+		self.new(:lockings[ $locking ]);
 	}
 }
 
@@ -1619,16 +1632,21 @@ class Renderer::SQL does Renderer {
 		@result;
 	}
 
-	multi method render-locking(Locking:D $locking --> List) {
+	method render-locking(Locking::Clause $locking --> List) {
 		my @result = 'FOR', $locking.strength.Str.uc;
 		@result.push('OF', self.render-names($locking.tables)) with $locking.tables;
 		@result.push('NOWAIT') if $locking.no-wait;
 		@result.push('SKIP LOCKED') if $locking.skip-locked;
 		@result;
 	}
-	multi method render-locking(Locking:U --> List) {
+
+	multi method render-lockings(Locking:D $lockings --> Str) {
+		$lockings.lockings.map({ self.render-locking($^locking) }).join(', ');
+	}
+	multi method render-lockings(Locking:U $lockings --> List) {
 		Empty;
 	}
+
 
 	method render-select-core(Placeholders $placeholders, Select $select --> Str) {
 		my @parts = 'SELECT';
@@ -1648,7 +1666,7 @@ class Renderer::SQL does Renderer {
 		@parts.append: self.render-select-core($placeholders, $select);
 		@parts.append: self.render-order-by($placeholders, $select.order-by);
 		@parts.append: self.render-limit-offset($placeholders, $select.limit, $select.offset);
-		@parts.append: self.render-locking($select.locking);
+		@parts.append: self.render-lockings($select.locking);
 		@parts.join(' ');
 	}
 
