@@ -1973,6 +1973,125 @@ SQL::Abstract abstracts the generation of SQL queries. Fundamentally its functio
 
 It should be able to represent any C<SELECT>, C<UPDATE>, C<INSERT>, or C<DELETE> query that is valid in both Postgresql and SQLite. This subset should be generally portable to other databases as well.
 
+=head1 Class SQL::Abstract
+
+This is the main class of the 
+
+=head3 new(:$placeholders!)
+
+This creates a new C<SQL::Abstract> object. It has one mandatory name argument, C<$placeholders>, which takes one of the following values:
+
+=begin item1
+C<dbi>/C<SQL::Abstract::Placeholders::DBI>
+
+This will use DBI style C<(?, ?)> placeholders
+=end item1
+
+=begin item1
+C<postgres>/C<SQL::Abstract::Placeholders::Postgres>
+
+This will use Postgres style C<($1, $2)> placeholders.
+=end item1
+
+=head2 select
+
+=begin code :lang<raku>
+
+method select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$prepare)
+
+=end code
+
+This will generate a C<SELECT> query. It will select C<$columns> from C<$source>, filtering by $conditions. 
+
+=begin code :lang<raku>
+
+my $join = { :left<books>, :right<authors>, :using<author_id> };
+my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost{ '<' => 10 } });
+# SELECT books.name, authors.name FROM books INNER JOIN authors USING (author_id) WHERE cost < 10
+
+my @columns = [ 'name', :sum{ :function<count>, :arguments(*) } ];
+my $counts = $$abstract.select('artists', @columns, { :name(like => 'A%') }, :group-by<name>, :order-by(:sum<desc>));
+# SELECT name, COUNT(*) as sum FROM artists WHERE name LIKE 'A%' GROUP BY name ORDER BY sum DESC
+
+=end code
+
+=head2 update
+
+=begin code :lang<raku>
+
+method update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
+
+=end code
+
+This will update C<$target> by assigning the columns and values from C<$set> if they match C<$where>, returning C<$returning>.
+
+=head2 insert
+
+=head3 Hash insertion
+
+=begin code :lang<raku>
+
+method insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
+
+=end code
+
+Inserts the values in C<$values> into the table C<$target>, returning the columns in C<$returning>
+
+=begin code :lang<raku>
+
+$abstract.insert('artists', { :name<Metallica> }, :returning(*));
+# INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
+
+=end code
+
+=head3 List insertions
+
+=begin code :lang<raku>
+
+insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
+
+=end code
+
+Insert into C<$target>, assigning each of the values in Rows to a new row in the table. This way one can insert a multitude of rows into a table.
+
+=begin code :lang<raku>
+
+$abstract.insert('artists', ['name'], [ [ 'Metallica'], ['Motörhead'] ], :returning(*));
+# INSERT INTO artists (name) VALUES ('Metallica'), ('Motörhead') RETURNING *
+
+$abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
+# INSERT INTO artists VALUES ('Metallica') RETURNING id
+
+=end code
+
+=head3 Select insertion
+
+=head2 insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
+
+=begin code :lang<raku>
+
+$abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
+# INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
+
+=end code
+
+=head2
+
+=begin code :lang<raku>
+
+delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
+
+=end code
+
+This deletes rows from the database, optionally returning their values.
+
+=begin code :lang<raku>
+
+$abstract.delete('artists', { :name<Madonna> });
+# DELETE FROM artists WHERE name = 'Madonna'
+
+=end code
+
 =head1 Helper types
 
 SQL::Abstract uses various helper types:
@@ -2118,126 +2237,6 @@ This takes a list of pairs, or a hash. The keys shall be a value or an expressio
 =head2 SQL::Abstract::OrderBy
 
 This takes a list of things to sort by. Much like C<Column::List> this accepts identifiers and expressions, but C<*> isn't allowed and pair values are interpreted as order modifier (e.g. C<:column<desc>>). A hash element will be expanded as well (e.g. C<< { :column<column_name>, :order<desc>, :nulls<last> } >>)
-
-=head1 Class SQL::Abstract
-
-This is the main class of the 
-
-=head3 new(:$placeholders!)
-
-This creates a new C<SQL::Abstract> object. It has one mandatory name argument, C<$placeholders>, which takes one of the following values:
-
-=begin item1
-C<dbi>/C<SQL::Abstract::Placeholders::DBI>
-
-This will use DBI style C<(?, ?)> placeholders
-=end item1
-
-=begin item1
-C<postgres>/C<SQL::Abstract::Placeholders::Postgres>
-
-This will use Postgres style C<($1, $2)> placeholders.
-=end item1
-
-=head2 select
-
-=begin code :lang<raku>
-
-method select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$prepare)
-
-=end code
-
-This will generate a C<SELECT> query. It will select C<$columns> from C<$source>, filtering by $conditions. 
-
-=begin code :lang<raku>
-
-my $join = { :left<books>, :right<authors>, :using<author_id> };
-my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost{ '<' => 10 } });
-# SELECT books.name, authors.name FROM books INNER JOIN authors USING (author_id) WHERE cost < 10
-
-my @columns = [ 'name', :sum{ :function<count>, :arguments(*) } ];
-my $counts = $$abstract.select('artists', @columns, { :name(like => 'A%') }, :group-by<name>, :order-by(:sum<desc>));
-# SELECT name, COUNT(*) as sum FROM artists WHERE name LIKE 'A%' GROUP BY name ORDER BY sum DESC
-
-=end code
-
-=head2 update
-
-=begin code :lang<raku>
-
-method update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
-
-=end code
-
-This will update C<$target> by assigning the columns and values from C<$set> if they match C<$where>, returning C<$returning>.
-
-=head2 insert
-
-=head3 Hash insertion
-
-=begin code :lang<raku>
-
-method insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
-
-=end code
-
-Inserts the values in C<$values> into the table C<$target>, returning the columns in C<$returning>
-
-=begin code :lang<raku>
-
-$abstract.insert('artists', { :name<Metallica> }, :returning(*));
-# INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
-
-=end code
-
-=head3 List insertions
-
-=begin code :lang<raku>
-
-insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
-
-=end code
-
-Insert into C<$target>, assigning each of the values in Rows to a new row in the table. This way one can insert a multitude of rows into a table.
-
-=begin code :lang<raku>
-
-$abstract.insert('artists', ['name'], [ [ 'Metallica'], ['Motörhead'] ], :returning(*));
-# INSERT INTO artists (name) VALUES ('Metallica'), ('Motörhead') RETURNING *
-
-$abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
-# INSERT INTO artists VALUES ('Metallica') RETURNING id
-
-=end code
-
-=head3 Select insertion
-
-=head2 insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
-
-=begin code :lang<raku>
-
-$abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
-# INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
-
-=end code
-
-=head2
-
-=begin code :lang<raku>
-
-delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
-
-=end code
-
-This deletes rows from the database, optionally returning their values.
-
-=begin code :lang<raku>
-
-$abstract.delete('artists', { :name<Madonna> });
-# DELETE FROM artists WHERE name = 'Madonna'
-
-=end code
-
 
 =head1 Author
 

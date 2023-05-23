@@ -32,6 +32,107 @@ SQL::Abstract abstracts the generation of SQL queries. Fundamentally its functio
 
 It should be able to represent any `SELECT`, `UPDATE`, `INSERT`, or `DELETE` query that is valid in both Postgresql and SQLite. This subset should be generally portable to other databases as well.
 
+Class SQL::Abstract
+===================
+
+This is the main class of the 
+
+### new(:$placeholders!)
+
+This creates a new `SQL::Abstract` object. It has one mandatory name argument, `$placeholders`, which takes one of the following values:
+
+  * `dbi`/`SQL::Abstract::Placeholders::DBI`
+
+    This will use DBI style `(?, ?)` placeholders
+
+  * `postgres`/`SQL::Abstract::Placeholders::Postgres`
+
+    This will use Postgres style `($1, $2)` placeholders.
+
+select
+------
+
+```raku
+method select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$prepare)
+```
+
+This will generate a `SELECT` query. It will select `$columns` from `$source`, filtering by $conditions. 
+
+```raku
+my $join = { :left<books>, :right<authors>, :using<author_id> };
+my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost{ '<' => 10 } });
+# SELECT books.name, authors.name FROM books INNER JOIN authors USING (author_id) WHERE cost < 10
+
+my @columns = [ 'name', :sum{ :function<count>, :arguments(*) } ];
+my $counts = $$abstract.select('artists', @columns, { :name(like => 'A%') }, :group-by<name>, :order-by(:sum<desc>));
+# SELECT name, COUNT(*) as sum FROM artists WHERE name LIKE 'A%' GROUP BY name ORDER BY sum DESC
+```
+
+update
+------
+
+```raku
+method update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
+```
+
+This will update `$target` by assigning the columns and values from `$set` if they match `$where`, returning `$returning`.
+
+insert
+------
+
+### Hash insertion
+
+```raku
+method insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
+```
+
+Inserts the values in `$values` into the table `$target`, returning the columns in `$returning`
+
+```raku
+$abstract.insert('artists', { :name<Metallica> }, :returning(*));
+# INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
+```
+
+### List insertions
+
+```raku
+insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
+```
+
+Insert into `$target`, assigning each of the values in Rows to a new row in the table. This way one can insert a multitude of rows into a table.
+
+```raku
+$abstract.insert('artists', ['name'], [ [ 'Metallica'], ['Motörhead'] ], :returning(*));
+# INSERT INTO artists (name) VALUES ('Metallica'), ('Motörhead') RETURNING *
+
+$abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
+# INSERT INTO artists VALUES ('Metallica') RETURNING id
+```
+
+### Select insertion
+
+insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
+----------------------------------------------------------------------------------------------------
+
+```raku
+$abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
+# INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
+```
+
+
+
+
+```raku
+delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
+```
+
+This deletes rows from the database, optionally returning their values.
+
+```raku
+$abstract.delete('artists', { :name<Madonna> });
+# DELETE FROM artists WHERE name = 'Madonna'
+```
+
 Helper types
 ============
 
@@ -198,107 +299,6 @@ SQL::Abstract::OrderBy
 ----------------------
 
 This takes a list of things to sort by. Much like `Column::List` this accepts identifiers and expressions, but `*` isn't allowed and pair values are interpreted as order modifier (e.g. `:column<desc>`). A hash element will be expanded as well (e.g. `{ :column<column_name>, :order<desc>, :nulls<last> } `)
-
-Class SQL::Abstract
-===================
-
-This is the main class of the 
-
-### new(:$placeholders!)
-
-This creates a new `SQL::Abstract` object. It has one mandatory name argument, `$placeholders`, which takes one of the following values:
-
-  * `dbi`/`SQL::Abstract::Placeholders::DBI`
-
-    This will use DBI style `(?, ?)` placeholders
-
-  * `postgres`/`SQL::Abstract::Placeholders::Postgres`
-
-    This will use Postgres style `($1, $2)` placeholders.
-
-select
-------
-
-```raku
-method select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$prepare)
-```
-
-This will generate a `SELECT` query. It will select `$columns` from `$source`, filtering by $conditions. 
-
-```raku
-my $join = { :left<books>, :right<authors>, :using<author_id> };
-my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost{ '<' => 10 } });
-# SELECT books.name, authors.name FROM books INNER JOIN authors USING (author_id) WHERE cost < 10
-
-my @columns = [ 'name', :sum{ :function<count>, :arguments(*) } ];
-my $counts = $$abstract.select('artists', @columns, { :name(like => 'A%') }, :group-by<name>, :order-by(:sum<desc>));
-# SELECT name, COUNT(*) as sum FROM artists WHERE name LIKE 'A%' GROUP BY name ORDER BY sum DESC
-```
-
-update
-------
-
-```raku
-method update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
-```
-
-This will update `$target` by assigning the columns and values from `$set` if they match `$where`, returning `$returning`.
-
-insert
-------
-
-### Hash insertion
-
-```raku
-method insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
-```
-
-Inserts the values in `$values` into the table `$target`, returning the columns in `$returning`
-
-```raku
-$abstract.insert('artists', { :name<Metallica> }, :returning(*));
-# INSERT INTO artists (name) VALUES ('Metallica') RETURNING *
-```
-
-### List insertions
-
-```raku
-insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
-```
-
-Insert into `$target`, assigning each of the values in Rows to a new row in the table. This way one can insert a multitude of rows into a table.
-
-```raku
-$abstract.insert('artists', ['name'], [ [ 'Metallica'], ['Motörhead'] ], :returning(*));
-# INSERT INTO artists (name) VALUES ('Metallica'), ('Motörhead') RETURNING *
-
-$abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
-# INSERT INTO artists VALUES ('Metallica') RETURNING id
-```
-
-### Select insertion
-
-insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
-----------------------------------------------------------------------------------------------------
-
-```raku
-$abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
-# INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
-```
-
-
-
-
-```raku
-delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
-```
-
-This deletes rows from the database, optionally returning their values.
-
-```raku
-$abstract.delete('artists', { :name<Madonna> });
-# DELETE FROM artists WHERE name = 'Madonna'
-```
 
 Author
 ======
