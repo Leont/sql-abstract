@@ -760,7 +760,11 @@ package Window {
 			$!existing && !$!partition-by && !$!order-by;
 		}
 
-		method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Window::Frame(Map) :$frame)) {
+		multi method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Boundary:D(Any) :$from, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode:D(Str) :$mode = Mode::Rows)) {
+			my $frame = Frame.COERCE({ :$mode, :$from, :$to, :$exclude });
+			self.new(:$existing, :$partition-by, :$order-by, :$frame);
+		}
+		multi method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Window::Frame(Map) :$frame)) {
 			self.new(:$existing, :$partition-by, :$order-by, :$frame);
 		}
 	}
