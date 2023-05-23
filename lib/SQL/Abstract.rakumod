@@ -1635,11 +1635,11 @@ class Renderer::SQL does Renderer {
 	method render-window(Placeholders $placeholders, Window::Clause $window --> Str) {
 		my $name = self.render-identifier($window.name);
 		my $definition = self.render-window-definition($placeholders, $window.definition);
-		"WINDOW $name AS $definition";
+		"$name AS $definition";
 	}
 
-	multi method render-windows(Placeholders $placeholders, Window::Clauses:D $windows --> Str) {
-		$windows.windows.map({ self.render-window($placeholders, $^window) }).join(', ');
+	multi method render-windows(Placeholders $placeholders, Window::Clauses:D $windows --> List) {
+		'WINDOW', $windows.windows.map({ self.render-window($placeholders, $^window) }).join(', ');
 	}
 	multi method render-windows(Placeholders $placeholders, Window::Clauses:U $windows --> List) {
 		Empty;
