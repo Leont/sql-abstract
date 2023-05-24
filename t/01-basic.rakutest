@@ -123,7 +123,7 @@ my $select-window5 = $abstract.select('my_table', ( bar => { :function<count>, :
 is-deeply $select-window5, result('SELECT count(DISTINCT foo ORDER BY bar) FILTER (WHERE a > $1) OVER () AS bar FROM my_table', [3]);
 
 my $select-window6 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :partition-by<baz quz>, :order-by<quz>, :from<preceding> } }));
-is-deeply $select-window6, result('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz RANGE UNBOUNDED PRECEDING) AS bar FROM my_table', []);
+is-deeply $select-window6, result('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz) AS bar FROM my_table', []);
 
 my $select-window7 = $abstract.select('my_table', ( bar => { :function<rank>, :over{ :partition-by<baz quz>, :order-by<quz>, :from(:1preceding), :to(:2following), :exclude<group>, :mode<range> } }));
 is-deeply $select-window7, result('SELECT rank() OVER (PARTITION BY baz, quz ORDER BY quz RANGE BETWEEN $1 PRECEDING AND $2 FOLLOWING EXCLUDE GROUP) AS bar FROM my_table', [1, 2]);

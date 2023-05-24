@@ -745,12 +745,8 @@ package Window {
 	class Frame {
 		has Window::Mode:D $.mode is required;
 		has Boundary:D $.from is required;
-		has Boundary $.to is required;
-		has Exclusion $.exclude;
-
-		method COERCE(Map (Boundary(Any) :$from!, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode:D(Str) :$mode = Mode::Range)) {
-			self.new(:$mode, :$from, :$to, :$exclude);
-		}
+		has Boundary $.to;
+		has Exclusion:D $.exclude is required;
 	}
 
 	class Definition {
@@ -763,11 +759,9 @@ package Window {
 			$!existing && !$!partition-by && !$!order-by && !$!frame;
 		}
 
-		multi method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Boundary:D(Any) :$from, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode(Str) :$mode = Mode::Range)) {
-			my $frame = Frame.COERCE({ :$mode, :$from, :$to, :$exclude });
-			self.new(:$existing, :$partition-by, :$order-by, :$frame);
-		}
-		multi method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Window::Frame(Map) :$frame)) {
+		method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Boundary(Any) :$from = Boundary::Preceding::Unbounded.new, Boundary(Any) :$to, Exclusion(Str) :$exclude = Exclusion::NoOthers, Mode(Str) :$mode = Mode::Range)) {
+			my $default-frame = $from ~~ Boundary::Preceding::Unbounded && !$to && $mode === Mode::Range && $exclude === Exclusion::NoOthers;
+			my $frame = $default-frame ?? Frame !! Frame.new(:$mode, :$from, :$to, :$exclude);
 			self.new(:$existing, :$partition-by, :$order-by, :$frame);
 		}
 	}
