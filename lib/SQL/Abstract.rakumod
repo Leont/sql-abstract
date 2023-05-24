@@ -177,6 +177,9 @@ class Column::List does Value::List {
 	multi to-column(Whatever) {
 		Identifier.new('*');
 	}
+	multi to-column(Map $map (Str :$function!, Str:D :$over, *%args)) {
+		Function.COERCE({ :name($function), |%args }).over(:existing($over));
+	}
 	multi to-column(Map $map (Str :$function!, :%over!, *%args)) {
 		Function.COERCE({ :name($function), |%args }).over(|%over);
 	}

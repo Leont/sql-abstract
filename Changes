@@ -7,6 +7,7 @@ Revision history for SQL-Abstract
     - Allow for multiple upsert clauses
     - Add support for CURRENT OF
     - Rename delay to delegate
+    - Allow for easier use of over on named windows
 
 0.0.3  2023-05-19T18:45:23+02:00
     - Split out Placeholders to SQL::Placeholders
