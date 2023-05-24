@@ -1798,9 +1798,9 @@ class Renderer::SQL does Renderer {
 		(@rows, @order-by, @limits).flat.join(' ');
 	}
 
-	method render(Expression $expression) {
+	method render(Expression:D $expression, Precedence:D :$precedence = Precedence::Rowlike) {
 		my $placeholders = self.placeholders.new;
-		my $sql          = self.render-expression($placeholders, $expression, Precedence::Rowlike);
+		my $sql          = self.render-expression($placeholders, $expression, $precedence);
 		SQL::Query.new($sql, $placeholders.values);
 	}
 }
