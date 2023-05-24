@@ -748,7 +748,7 @@ package Window {
 		has Boundary $.to is required;
 		has Exclusion $.exclude;
 
-		method COERCE(Map (Boundary(Any) :$from!, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode:D(Str) :$mode = Mode::Rows)) {
+		method COERCE(Map (Boundary(Any) :$from!, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode:D(Str) :$mode = Mode::Range)) {
 			self.new(:$mode, :$from, :$to, :$exclude);
 		}
 	}
@@ -760,10 +760,10 @@ package Window {
 		has Frame        $.frame;
 
 		method is-simple() {
-			$!existing && !$!partition-by && !$!order-by;
+			$!existing && !$!partition-by && !$!order-by && !$!frame;
 		}
 
-		multi method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Boundary:D(Any) :$from, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode:D(Str) :$mode = Mode::Rows)) {
+		multi method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Boundary:D(Any) :$from, Boundary(Any) :$to, Exclusion(Str) :$exclude, Mode(Str) :$mode = Mode::Range)) {
 			my $frame = Frame.COERCE({ :$mode, :$from, :$to, :$exclude });
 			self.new(:$existing, :$partition-by, :$order-by, :$frame);
 		}
