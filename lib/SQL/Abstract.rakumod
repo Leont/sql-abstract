@@ -1428,6 +1428,9 @@ class Renderer::SQL does Renderer {
 		my $cursor = self.render-identifier($current.cursor);
 		"CURRENT OF $cursor";
 	}
+	multi method render-expression(Placeholders $placeholders, Expression::Custom $custom, Precedence --> Str) {
+		$custom.render-sql(self);
+	}
 
 	multi method render-expression(Placeholders $placeholders, Function $function, Precedence --> Str) {
 		my @expressions = $function.quantifier ?? $function.quantifier.uc !! Empty;
