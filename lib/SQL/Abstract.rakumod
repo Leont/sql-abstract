@@ -2064,7 +2064,7 @@ $abstract.delete('artists', { :name<Madonna> });
 
 =head1 Helper types
 
-SQL::Abstract uses various helper types:
+SQL::Abstract uses various helper types that will generally coerce from basic datastructures:
 
 =head2 SQL::Abstract::Identifier
 
@@ -2085,6 +2085,12 @@ This will interpret the elements of the list representing the components of the 
 =head2 SQL::Abstract::Identifiers
 
 This takes either a list of C<Identifier()>, or a single C<Identifier()>. Note that a single list will be interpreted will be interpreted as a list of string identifiers, if one wants to pass a single list-from identifier the list must be nested (e.g. C<[ <table column>,]>).
+
+=begin code :lang<raku>
+
+my SQL::Abstract::Identifiers() $identifiers = <name email website>;
+
+=end code
 
 =head2 SQL::Abstract::Source
 
@@ -2115,7 +2121,7 @@ This will use the result of a subquery as if it's a table.
 =end item1
 
 =begin item1
-Hash
+Map
 
 This will join two `Source`s, named C<left> and C<right>, it requires one of the following entries to join them on:
 
@@ -2136,9 +2142,24 @@ This role takes the same conversions as C<Source>, but only the ones that repres
 
 =head2 SQL::Abstract::Column::List
 
-This is a list much like C<Identifiers>, however it will accept not just identifiers but any expression (e.g. comparisons, function calls, etc…). If given a pair it will rename the value to the key (C<value AS key>). A whatever-star will represent all columns.
+=begin code :lang<raku>
+
+my Column::List() $columns = ('name', :number(:count(*)));
+# name, COUNT(*) AS number;
+
+=end code
+
+This is a list of items representing a column. Each item can either be a:
+much like C<Identifiers>, however it will accept not just identifiers but any expression (e.g. comparisons, function calls, etc…). If given a pair it will rename the value to the key (C<value AS key>). A whatever-star will represent all columns.
 
 =head2 SQL::Abstract::Conditions
+
+=begin code :lang<raku>
+
+my Conditions() $conditions = { :name(:like<%leon%>), :age(25..45), :country('nl'|'be'|lu') };
+# name LIKE '%leon%' AND AGE BETWEEN 25 AND 45 AND country IN('nl', 'be', 'lu')
+
+=end code
 
 This is a pair, a list of pairs, a hash or an C<Expression>. In the former three cases, the key (called left in the rest of this section) shall be an C<Identifier()> designating a column name, or an C<Expression>. The right hand side can be one of several types:
 
@@ -2207,6 +2228,121 @@ This takes a list of pairs, or a hash. The keys shall be a value or an expressio
 =head2 SQL::Abstract::OrderBy
 
 This takes a list of things to sort by. Much like C<Column::List> this accepts identifiers and expressions, but C<*> isn't allowed and pair values are interpreted as order modifier (e.g. C<:column<desc>>). A hash element will be expanded as well (e.g. C<< { :column<column_name>, :order<desc>, :nulls<last> } >>)
+
+=head2 SQL::Abstract::Common
+
+This represents a common table expression. It converts from a pair or a list of pairs, with the keys being the name and the values being either a table name, a select hash or an C<SQL::Abstract::Query> object.
+
+=begin code :lang<raku>
+
+my Common() $cte = recent => { :source<users>, :columns('name', :count(:count(*)), :group-by(name) };
+# WITH recent AS (SELECT name, COUNT(*) AS count FROM users GROUP BY name);
+
+=end code
+
+=head2 SQL::Abstract::Locking
+
+This takes one or more locking clauses. A locking clause is usually taken ... strings: C<'update'>, C'<no key update'>, C<'share'>, C<'key share'>, but it can also take a pair of stregth
+
+=head2 SQL::Abstract::GroupBy
+
+This takes a list of grouping elements. Usually these are just columns, but they may also be arbitrary expressions (inclusing lists of columns). A pair is taken as a function call with the key as function name and the value as arguments.
+
+=head2 SQL::Abstract::Conflicts
+
+This represents one or more upsert clause. It can either be the string C<'nothing'>, or a pair with the columns as keys and an C<Assigns(Map)>.
+
+=begin code :lang<raku>
+
+my SQL::Abstract::Conflicts = <name organization> => { :$email };
+# ON CONFLICT (name, organization) DO UPDATE email = ?
+
+=end code
+
+=head2 SQL::Abstract::Distinction
+
+This takes C<True>for a distinct row, or a C<Column::List> for specific rows that have to be distinct.
+
+=head2 Window::Definition
+
+Window definiton converts from a map taking the following keys, all optional:
+
+=begin item1
+Identifier(Cool) :$existing
+
+This takes the name of an existing window
+=end item1
+
+=begin item1
+Column::List(Any) :$partition-by
+
+This lists expressions to partition the rows by, somewhat similar to a C<GROUP BY>.
+=end item1
+
+=begin item1
+OrderBy(Any) :$order-by
+
+The order within a frame.
+=end item1
+
+=begin item1
+Boundary(Any) :$from
+
+This argument defines the starting boundary of the frame. This can be any of:
+
+=item2 'preceding'
+=item2 :preceding($amount)
+=item2 'current'
+=item2 :following($amount)
+=end item1
+
+It defaults to 'preceding'.
+
+=begin item1
+Boundary(Any) :$to
+
+This optional argument defines the ending boundary of the frame, This can be any of:
+
+=item2 :preceding($amount)
+=item2 'current'
+=item2 :following($amount)
+=item2 'following'
+
+=end item1
+
+=begin item1
+Mode:D(Str) :$mode = Mode::Range
+
+The mode of the frame takes one of C<'rows'>, C<'range'> or C<'groups'>, defaulting to C<'range'>.
+=end item1
+
+=begin item1
+Exclusion(Str) :$exclude
+
+The exclusion of the frame, it takes one of C<'current row'>, C<'group'>, C<'ties'> or C<'no others'> (the default).
+=end item1
+
+=begin code :lang<raku>
+
+my Window::Definition $d = { :partition-by<foo bar>, :from<current> :to(:following(5)), :exclude<ties> }
+# PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES
+
+=end code
+
+=head2 Window::Clauses
+
+This takes one or more pairs, with the names being windows names and the values taking window definition maps.
+
+=begin code :lang<raku>
+
+my Windows::Clauses $clauses =
+    over5 => { :frame{ :preceding(5) } },
+    foo => { :partition-by<foo bar>, :mode<range>, :from<current> :to(:following(5)), :exclude<ties> };
+# WINDOW
+#   over5 AS (ROWS 5 PRECEDING),
+#   foo as (PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES)
+
+=end code
 
 =head1 Author
 

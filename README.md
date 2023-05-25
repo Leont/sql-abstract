@@ -136,7 +136,7 @@ $abstract.delete('artists', { :name<Madonna> });
 Helper types
 ============
 
-SQL::Abstract uses various helper types:
+SQL::Abstract uses various helper types that will generally coerce from basic datastructures:
 
 SQL::Abstract::Identifier
 -------------------------
@@ -155,6 +155,10 @@ SQL::Abstract::Identifiers
 --------------------------
 
 This takes either a list of `Identifier()`, or a single `Identifier()`. Note that a single list will be interpreted will be interpreted as a list of string identifiers, if one wants to pass a single list-from identifier the list must be nested (e.g. `[ <table column>,]`).
+
+```raku
+my SQL::Abstract::Identifiers() $identifiers = <name email website>;
+```
 
 SQL::Abstract::Source
 ---------------------
@@ -177,7 +181,7 @@ A source is source of data, usually a table or a join. If not passed as a `Sourc
 
     This will use the result of a subquery as if it's a table.
 
-  * Hash
+  * Map
 
     This will join two `Source`s, named `left` and `right`, it requires one of the following entries to join them on:
 
@@ -201,10 +205,20 @@ This role takes the same conversions as `Source`, but only the ones that represe
 SQL::Abstract::Column::List
 ---------------------------
 
-This is a list much like `Identifiers`, however it will accept not just identifiers but any expression (e.g. comparisons, function calls, etc…). If given a pair it will rename the value to the key (`value AS key`). A whatever-star will represent all columns.
+```raku
+my Column::List() $columns = ('name', :number(:count(*)));
+# name, COUNT(*) AS number;
+```
+
+This is a list of items representing a column. Each item can either be a: much like `Identifiers`, however it will accept not just identifiers but any expression (e.g. comparisons, function calls, etc…). If given a pair it will rename the value to the key (`value AS key`). A whatever-star will represent all columns.
 
 SQL::Abstract::Conditions
 -------------------------
+
+```raku
+my Conditions() $conditions = { :name(:like<%leon%>), :age(25..45), :country('nl'|'be'|lu') };
+# name LIKE '%leon%' AND AGE BETWEEN 25 AND 45 AND country IN('nl', 'be', 'lu')
+```
 
 This is a pair, a list of pairs, a hash or an `Expression`. In the former three cases, the key (called left in the rest of this section) shall be an `Identifier()` designating a column name, or an `Expression`. The right hand side can be one of several types:
 
@@ -299,6 +313,111 @@ SQL::Abstract::OrderBy
 ----------------------
 
 This takes a list of things to sort by. Much like `Column::List` this accepts identifiers and expressions, but `*` isn't allowed and pair values are interpreted as order modifier (e.g. `:column<desc>`). A hash element will be expanded as well (e.g. `{ :column<column_name>, :order<desc>, :nulls<last> } `)
+
+SQL::Abstract::Common
+---------------------
+
+This represents a common table expression. It converts from a pair or a list of pairs, with the keys being the name and the values being either a table name, a select hash or an `SQL::Abstract::Query` object.
+
+```raku
+my Common() $cte = recent => { :source<users>, :columns('name', :count(:count(*)), :group-by(name) };
+# WITH recent AS (SELECT name, COUNT(*) AS count FROM users GROUP BY name);
+```
+
+SQL::Abstract::Locking
+----------------------
+
+This takes one or more locking clauses. A locking clause is usually taken ... strings: `'update'`, C'<no key update'>, `'share'`, `'key share'`, but it can also take a pair of stregth
+
+SQL::Abstract::GroupBy
+----------------------
+
+This takes a list of grouping elements. Usually these are just columns, but they may also be arbitrary expressions (inclusing lists of columns). A pair is taken as a function call with the key as function name and the value as arguments.
+
+SQL::Abstract::Conflicts
+------------------------
+
+This represents one or more upsert clause. It can either be the string `'nothing'`, or a pair with the columns as keys and an `Assigns(Map)`.
+
+```raku
+my SQL::Abstract::Conflicts = <name organization> => { :$email };
+# ON CONFLICT (name, organization) DO UPDATE email = ?
+```
+
+SQL::Abstract::Distinction
+--------------------------
+
+This takes `True`for a distinct row, or a `Column::List` for specific rows that have to be distinct.
+
+Window::Definition
+------------------
+
+Window definiton converts from a map taking the following keys, all optional:
+
+  * Identifier(Cool) :$existing
+
+    This takes the name of an existing window
+
+  * Column::List(Any) :$partition-by
+
+    This lists expressions to partition the rows by, somewhat similar to a `GROUP BY`.
+
+  * OrderBy(Any) :$order-by
+
+    The order within a frame.
+
+  * Boundary(Any) :$from
+
+    This argument defines the starting boundary of the frame. This can be any of:
+
+        * 'preceding'
+
+        * :preceding($amount)
+
+        * 'current'
+
+        * :following($amount)
+
+It defaults to 'preceding'.
+
+  * Boundary(Any) :$to
+
+    This optional argument defines the ending boundary of the frame, This can be any of:
+
+        * :preceding($amount)
+
+        * 'current'
+
+        * :following($amount)
+
+        * 'following'
+
+  * Mode:D(Str) :$mode = Mode::Range
+
+    The mode of the frame takes one of `'rows'`, `'range'` or `'groups'`, defaulting to `'range'`.
+
+  * Exclusion(Str) :$exclude
+
+    The exclusion of the frame, it takes one of `'current row'`, `'group'`, `'ties'` or `'no others'` (the default).
+
+```raku
+my Window::Definition $d = { :partition-by<foo bar>, :from<current> :to(:following(5)), :exclude<ties> }
+# PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES
+```
+
+Window::Clauses
+---------------
+
+This takes one or more pairs, with the names being windows names and the values taking window definition maps.
+
+```raku
+my Windows::Clauses $clauses =
+    over5 => { :frame{ :preceding(5) } },
+    foo => { :partition-by<foo bar>, :mode<range>, :from<current> :to(:following(5)), :exclude<ties> };
+# WINDOW
+#   over5 AS (ROWS 5 PRECEDING),
+#   foo as (PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES)
+```
 
 Author
 ======
