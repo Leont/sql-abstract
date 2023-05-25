@@ -1945,33 +1945,37 @@ It should be able to represent any C<SELECT>, C<UPDATE>, C<INSERT>, or C<DELETE>
 
 =head1 Class SQL::Abstract
 
-This is the main class of the 
+This is the main class of the module.
 
-=head3 new(:$placeholders!)
+=head3 new(:$placeholders!, Bool :$quoting)
 
 This creates a new C<SQL::Abstract> object. It has one mandatory name argument, C<$placeholders>, which takes one of the following values:
 
 =begin item1
-C<dbi>/C<SQL::Abstract::Placeholders::DBI>
+C<'dbi'>/C<SQL::Abstract::Placeholders::DBI>
 
 This will use DBI style C<(?, ?)> placeholders
 =end item1
 
 =begin item1
-C<postgres>/C<SQL::Abstract::Placeholders::Postgres>
+C<'postgres'>/C<SQL::Abstract::Placeholders::Postgres>
 
 This will use Postgres style C<($1, $2)> placeholders.
 =end item1
+
+It also takes an optional argument C<:$quoting>, if enabled table and column names will always be quoted.
 
 =head2 select
 
 =begin code :lang<raku>
 
-method select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$prepare)
+method select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
+Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows,
+Compound(Pair) :$compound, OrderBy(Any) :$order-by, Int :$limit, Int :$offset, Locking(Any) :$locking)
 
 =end code
 
-This will generate a C<SELECT> query. It will select C<$columns> from C<$source>, filtering by $conditions. 
+This will generate a C<SELECT> query. It will select C<$columns> from C<$source>, filtering by $conditions.
 
 =begin code :lang<raku>
 
@@ -1989,7 +1993,8 @@ my $counts = $$abstract.select('artists', @columns, { :name(like => 'A%') }, :gr
 
 =begin code :lang<raku>
 
-method update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
+method update(Table(Any) $target, Assigns(Any) $assigns, Conditions(Any) $where?,
+Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning)
 
 =end code
 
@@ -1997,11 +2002,12 @@ This will update C<$target> by assigning the columns and values from C<$set> if 
 
 =head2 insert
 
-=head3 Hash insertion
+=head3 Map insertion
 
 =begin code :lang<raku>
 
-method insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
+method insert(Table(Any) $target, Assigns(Any) $values, Common(Any) :$common,
+Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning)
 
 =end code
 
@@ -2018,7 +2024,8 @@ $abstract.insert('artists', { :name<Metallica> }, :returning(*));
 
 =begin code :lang<raku>
 
-insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
+method insert(Table(Any) $target, Identifiers(Any) $columns, Rows(List) $rows, Common(Any) :$common,
+Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning)
 
 =end code
 
@@ -2026,7 +2033,7 @@ Insert into C<$target>, assigning each of the values in Rows to a new row in the
 
 =begin code :lang<raku>
 
-$abstract.insert('artists', ['name'], [ [ 'Metallica'], ['Motörhead'] ], :returning(*));
+$abstract.insert('artists', ['name'], [ ['Metallica'], ['Motörhead'] ], :returning(*));
 # INSERT INTO artists (name) VALUES ('Metallica'), ('Motörhead') RETURNING *
 
 $abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
@@ -2036,7 +2043,14 @@ $abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
 
 =head3 Select insertion
 
-=head2 insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
+=begin code :lang<raku>
+
+method insert(Table(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common,
+Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning)
+
+=end code
+
+This selects from a (usually different) table, and inserts the values into the table.
 
 =begin code :lang<raku>
 
@@ -2045,11 +2059,12 @@ $abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :r
 
 =end code
 
-=head2
+=head2 delete
 
 =begin code :lang<raku>
 
-delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
+method delete(Table:D(Any:D) $target, Conditions(Any) $where, Common(Any) :$common,
+Source(Any) :$using, Column::List(Any) :$returning)
 
 =end code
 

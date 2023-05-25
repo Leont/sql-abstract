@@ -35,28 +35,32 @@ It should be able to represent any `SELECT`, `UPDATE`, `INSERT`, or `DELETE` que
 Class SQL::Abstract
 ===================
 
-This is the main class of the 
+This is the main class of the module.
 
-### new(:$placeholders!)
+### new(:$placeholders!, Bool :$quoting)
 
 This creates a new `SQL::Abstract` object. It has one mandatory name argument, `$placeholders`, which takes one of the following values:
 
-  * `dbi`/`SQL::Abstract::Placeholders::DBI`
+  * `'dbi'`/`SQL::Abstract::Placeholders::DBI`
 
     This will use DBI style `(?, ?)` placeholders
 
-  * `postgres`/`SQL::Abstract::Placeholders::Postgres`
+  * `'postgres'`/`SQL::Abstract::Placeholders::Postgres`
 
     This will use Postgres style `($1, $2)` placeholders.
+
+It also takes an optional argument `:$quoting`, if enabled table and column names will always be quoted.
 
 select
 ------
 
 ```raku
-method select(Source() $source, Column::List() $columns = *, Conditions() $where?, Column::List() :$group-by, Conditions() :$having, OrderBy() :$order-by, Int :$limit, Int :$offset, :$prepare)
+method select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
+Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows,
+Compound(Pair) :$compound, OrderBy(Any) :$order-by, Int :$limit, Int :$offset, Locking(Any) :$locking)
 ```
 
-This will generate a `SELECT` query. It will select `$columns` from `$source`, filtering by $conditions. 
+This will generate a `SELECT` query. It will select `$columns` from `$source`, filtering by $conditions.
 
 ```raku
 my $join = { :left<books>, :right<authors>, :using<author_id> };
@@ -72,7 +76,8 @@ update
 ------
 
 ```raku
-method update(Table(Cool) $target, Assigns(Hash) $set, Conditions() $where?, Source() :$from, Column::List() :$returning)
+method update(Table(Any) $target, Assigns(Any) $assigns, Conditions(Any) $where?,
+Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning)
 ```
 
 This will update `$target` by assigning the columns and values from `$set` if they match `$where`, returning `$returning`.
@@ -80,10 +85,11 @@ This will update `$target` by assigning the columns and values from `$set` if th
 insert
 ------
 
-### Hash insertion
+### Map insertion
 
 ```raku
-method insert(Table(Cool) $target, Assigns() $values, Column::List() :$returning)
+method insert(Table(Any) $target, Assigns(Any) $values, Common(Any) :$common,
+Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning)
 ```
 
 Inserts the values in `$values` into the table `$target`, returning the columns in `$returning`
@@ -96,13 +102,14 @@ $abstract.insert('artists', { :name<Metallica> }, :returning(*));
 ### List insertions
 
 ```raku
-insert(Table(Cool) $target, Column::List() $columns, Rows(List) $rows, Column::List() :$returning)
+method insert(Table(Any) $target, Identifiers(Any) $columns, Rows(List) $rows, Common(Any) :$common,
+Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning)
 ```
 
 Insert into `$target`, assigning each of the values in Rows to a new row in the table. This way one can insert a multitude of rows into a table.
 
 ```raku
-$abstract.insert('artists', ['name'], [ [ 'Metallica'], ['Motörhead'] ], :returning(*));
+$abstract.insert('artists', ['name'], [ ['Metallica'], ['Motörhead'] ], :returning(*));
 # INSERT INTO artists (name) VALUES ('Metallica'), ('Motörhead') RETURNING *
 
 $abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
@@ -111,19 +118,24 @@ $abstract.insert('artists', List, [ [ 'Metallica'], ], :returning<id>);
 
 ### Select insertion
 
-insert(Table(Cool) $target, Identifiers() $columns, Select(Map) $values, Column::List() :$returning)
-----------------------------------------------------------------------------------------------------
+```raku
+method insert(Table(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common,
+Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning)
+```
+
+This selects from a (usually different) table, and inserts the values into the table.
 
 ```raku
 $abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
 # INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
 ```
 
-
-
+delete
+------
 
 ```raku
-delete(Table(Cool) $target, Conditions() $where?, Column::List() :$returning)
+method delete(Table:D(Any:D) $target, Conditions(Any) $where, Common(Any) :$common,
+Source(Any) :$using, Column::List(Any) :$returning)
 ```
 
 This deletes rows from the database, optionally returning their values.
