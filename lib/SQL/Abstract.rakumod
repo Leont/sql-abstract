@@ -938,7 +938,7 @@ class Common {
 }
 
 role Query::Common does Query {
-	has Common(Any)      $.common-tables;
+	has Common(Any)      $.common;
 }
 
 class Distinction::Full { ... }
@@ -1012,8 +1012,8 @@ class Select does Query::Common {
 	has Offset          $.offset;
 	has Locking         $.locking;
 
-	method create(Source(Any) :$source, Column::List:D(Any:D) :$columns = *, Conditions(Any) :$where, Common(Any) :$common-tables, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) {
-		Select.new(:$common-tables, :$distinct, :$columns, :$source, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
+	method create(Source(Any) :$source, Column::List:D(Any:D) :$columns = *, Conditions(Any) :$where, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) {
+		Select.new(:$common, :$distinct, :$columns, :$source, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
 	}
 }
 
@@ -1670,7 +1670,7 @@ class Renderer::SQL does Renderer {
 
 	multi method render-expression(Placeholders $placeholders, Select $select, Precedence --> Str) {
 		my @parts;
-		@parts.append: self.render-common-tables($placeholders, $select.common-tables);
+		@parts.append: self.render-common-tables($placeholders, $select.common);
 		@parts.append: self.render-select-core($placeholders, $select);
 		@parts.append: self.render-order-by($placeholders, $select.order-by);
 		@parts.append: self.render-limit-offset($placeholders, $select.limit, $select.offset);
@@ -1679,7 +1679,7 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-expression(Placeholders $placeholders, Update $update, Precedence --> Str) {
-		my @common       = self.render-common-tables($placeholders, $update.common-tables);
+		my @common       = self.render-common-tables($placeholders, $update.common);
 		my @target       = self.render-table($update.target);
 		my @set          = 'SET', self.render-expressions($placeholders, $update.assignments);
 		my @from         = self.render-from($placeholders, $update.from);
@@ -1735,7 +1735,7 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-expression(Placeholders $placeholders, Insert $insert, Precedence --> Str) {
-		my @common     = self.render-common-tables($placeholders, $insert.common-tables);
+		my @common     = self.render-common-tables($placeholders, $insert.common);
 		my @target     = self.render-table($insert.target);
 		my @columns    = self.render-identifiers($insert.columns);
 		my @overriding = $insert.overriding ?? self.render-overriding($insert.overriding) !! Empty;
@@ -1747,7 +1747,7 @@ class Renderer::SQL does Renderer {
 	}
 
 	multi method render-expression(Placeholders $placeholders, Delete $delete, Precedence) {
-		my @common    = self.render-common-tables($placeholders, $delete.common-tables);
+		my @common    = self.render-common-tables($placeholders, $delete.common);
 		my @target    = self.render-table($delete.target);
 		my @using     = self.render-from($placeholders, $delete.using, 'USING');
 		my @where     = self.render-conditions($placeholders, $delete.where);
@@ -1786,17 +1786,17 @@ multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 
-sub select(Source:D(Any:D) $source, Column::List:D(Any:D) $columns = *, Conditions(Any) $where?, Common(Any) :$common-tables, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) is export(:functions) {
-	Select.new(:$common-tables, :$distinct, :$columns, :$source, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
+sub select(Source:D(Any:D) $source, Column::List:D(Any:D) $columns = *, Conditions(Any) $where?, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) is export(:functions) {
+	Select.new(:$common, :$distinct, :$columns, :$source, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
 }
 
 method select(|args) {
 	$!renderer.render(select(|args));
 }
 
-sub update(Table:D(Any:D) $target, Assigns:D(Any:D) $assigns, Conditions(Any) $where?, Common(Any) :$common-tables, Source(Any) :$from, Column::List(Any) :$returning) is export(:functions) {
+sub update(Table:D(Any:D) $target, Assigns:D(Any:D) $assigns, Conditions(Any) $where?, Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning) is export(:functions) {
 	my @assignments = $assigns.assignments;
-	Update.new(:$common-tables, :$target, :@assignments, :$where, :$from, :$returning);
+	Update.new(:$common, :$target, :@assignments, :$where, :$from, :$returning);
 }
 
 method update(|args) {
@@ -1804,25 +1804,25 @@ method update(|args) {
 }
 
 proto insert(|) is export(:functions) { * }
-multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Rows:D(List:D) $rows, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
-	Insert::Values.new(:$common-tables, :$target, :$columns, :$rows, :$overriding, :$conflicts, :$returning);
+multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Rows:D(List:D) $rows, Common(Any) :$common, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	Insert::Values.new(:$common, :$target, :$columns, :$rows, :$overriding, :$conflicts, :$returning);
 }
-multi insert(Table:D(Any) $target, Assigns:D(Any) $values, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
-	samewith($target, $values.keys, [$values.values,], :$common-tables, :$overriding, :$conflicts, :$returning);
+multi insert(Table:D(Any) $target, Assigns:D(Any) $values, Common(Any) :$common, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	samewith($target, $values.keys, [$values.values,], :$common, :$overriding, :$conflicts, :$returning);
 }
-multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
-	Insert::Select.new(:$common-tables, :$target, :$columns, :$select, :$overriding, :$conflicts, :$returning);
+multi insert(Table:D(Any) $target, Identifiers(Any) $columns, Select(Map) $select, Common(Any) :$common, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	Insert::Select.new(:$common, :$target, :$columns, :$select, :$overriding, :$conflicts, :$returning);
 }
-multi insert(Table:D(Any) $target, Value::Default $, Common(Any) :$common-tables, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
-	Insert::Defaults.new(:$common-tables, :$target, :$overriding, :$conflicts, :$returning);
+multi insert(Table:D(Any) $target, Value::Default $, Common(Any) :$common, Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$returning) {
+	Insert::Defaults.new(:$common, :$target, :$overriding, :$conflicts, :$returning);
 }
 
 method insert(|args) {
 	$!renderer.render(insert(|args));
 }
 
-sub delete(Table:D(Any:D) $target, Conditions(Any) $where, Common(Any) :$common-tables, Source(Any) :$using, Column::List(Any) :$returning) is export(:functions) {
-	Delete.new(:$common-tables, :$target, :$where, :$using, :$returning);
+sub delete(Table:D(Any:D) $target, Conditions(Any) $where, Common(Any) :$common, Source(Any) :$using, Column::List(Any) :$returning) is export(:functions) {
+	Delete.new(:$common, :$target, :$where, :$using, :$returning);
 }
 
 method delete(|args) {

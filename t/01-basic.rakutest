@@ -191,10 +191,10 @@ my $select-precedence1 = $abstract.select('my_table', <bar baz>, $e);
 is-deeply $select-precedence1, result('SELECT bar, baz FROM my_table WHERE $1 < ($2 AND $3)', [1, 1, 2]);
 
 
-my $select-cte1 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => 'other_table' ]);
+my $select-cte1 = $abstract.select('my_table', <bar baz>, { :1foo }, :common[ my_table => 'other_table' ]);
 is-deeply $select-cte1, result('WITH my_table AS (SELECT * FROM other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
 
-my $select-cte2 = $abstract.select('my_table', <bar baz>, { :1foo }, :common-tables[ my_table => { :source<other_table> } ]);
+my $select-cte2 = $abstract.select('my_table', <bar baz>, { :1foo }, :common[ my_table => { :source<other_table> } ]);
 is-deeply $select-cte2, result('WITH my_table AS (SELECT * FROM other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
 
 
