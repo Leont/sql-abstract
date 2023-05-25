@@ -1429,15 +1429,8 @@ class Renderer::SQL does Renderer {
 		"CURRENT OF $cursor";
 	}
 
-	multi method render-quantifier(Quantifier:D $quantifier) {
-		$quantifier.uc;
-	}
-	multi method render-quantifier(Quantifier:U) {
-		Empty;
-	}
-
 	multi method render-expression(Placeholders $placeholders, Function $function, Precedence --> Str) {
-		my @expressions = self.render-quantifier($function.quantifier);
+		my @expressions = $function.quantifier ?? $function.quantifier.uc !! Empty;
 		@expressions.append: self.render-column-expressions($placeholders, $function.arguments);
 		@expressions.append: self.render-order-by($placeholders, $function.order-by);
 		my $expression = @expressions.join(' ');
@@ -1453,21 +1446,18 @@ class Renderer::SQL does Renderer {
 		self.render-expression($placeholders, $boundary.offset, Precedence::Between), $boundary.tag;
 	}
 
-	multi method render-window-frame(Placeholders $placeholders, Window::Frame:D $frame) {
+	multi method render-window-frame(Placeholders $placeholders, Window::Frame $frame) {
 		my $mode = $frame.mode.uc;
 		my @exclusion = $frame.exclude.defined ?? ('EXCLUDE', $frame.exclude.uc) !! Empty;
 		my $from = self.render-window-boundary($placeholders, $frame.from);
 		$mode, $from, |@exclusion;
 	}
-	multi method render-window-frame(Placeholders $placeholders, Window::Frame:D $frame where .to.defined) {
+	multi method render-window-frame(Placeholders $placeholders, Window::Frame $frame where .to.defined) {
 		my $mode = $frame.mode.uc;
 		my $from = self.render-window-boundary($placeholders, $frame.from);
 		my $to = self.render-window-boundary($placeholders, $frame.to);
 		my @exclusion = $frame.exclude.defined ?? ('EXCLUDE', $frame.exclude.uc) !! Empty;
 		$mode, 'BETWEEN', $from, 'AND', $to, |@exclusion;
-	}
-	multi method render-window-frame(Placeholders $placeholders, Window::Frame:U $frame) {
-		Empty;
 	}
 
 	multi method render-window-definition(Placeholders $placeholders, Window::Definition $definition --> Str) {
@@ -1475,7 +1465,7 @@ class Renderer::SQL does Renderer {
 		@inner.push: self.render-identifier($definition.existing) with $definition.existing;
 		@inner.push: self.render-column-expressions($placeholders, $definition.partition-by, 'PARTITION BY');
 		@inner.push: self.render-order-by($placeholders, $definition.order-by);
-		@inner.push: self.render-window-frame($placeholders, $definition.frame);
+		@inner.push: self.render-window-frame($placeholders, $definition.frame) with $definition.frame;
 		parenthesize-list(@inner);
 	}
 	multi method render-window-definition(Placeholders $placeholders, Window::Definition $definition where .is-simple --> Str) {
@@ -1493,9 +1483,6 @@ class Renderer::SQL does Renderer {
 	}
 	multi method render-distinct(Placeholders $placeholders, Distinction::Full:D $source, --> Str) {
 		'DISTINCT';
-	}
-	multi method render-distinct(Placeholders $placeholders, Distinction:U $source --> List) {
-		Empty;
 	}
 
 	multi method render-column-expressions(Placeholders $placeholders, Column::List:D $columns, Str $prefix? --> List) {
@@ -1618,15 +1605,12 @@ class Renderer::SQL does Renderer {
 		@result.join(' ');
 	}
 
-	multi method render-group-by(Placeholders $placeholders, GroupBy:D $group-by, Conditions $conditions --> List) {
+	method render-group-by(Placeholders $placeholders, GroupBy $group-by, Conditions $conditions --> List) {
 		my @result = 'GROUP BY';
 		@result.push: 'ALL' if $group-by.all;
 		@result.push: self.render-expression-list($placeholders, $group-by.elements, False);
 		@result.push: self.render-conditions($placeholders, $conditions, 'HAVING');
 		@result;
-	}
-	multi method render-group-by(Placeholders $placeholders, GroupBy:U $columns, Conditions $having --> List) {
-		Empty;
 	}
 
 	method render-window(Placeholders $placeholders, Window::Clause $window --> Str) {
@@ -1635,20 +1619,14 @@ class Renderer::SQL does Renderer {
 		"$name AS $definition";
 	}
 
-	multi method render-windows(Placeholders $placeholders, Window::Clauses:D $windows --> List) {
+	method render-windows(Placeholders $placeholders, Window::Clauses $windows --> List) {
 		'WINDOW', $windows.windows.map({ self.render-window($placeholders, $^window) }).join(', ');
 	}
-	multi method render-windows(Placeholders $placeholders, Window::Clauses:U $windows --> List) {
-		Empty;
-	}
 
-	multi method render-compound(Placeholders $placeholders, Compound:D $compound --> List) {
+	method render-compound(Placeholders $placeholders, Compound $compound --> List) {
 		my @type = $compound.all ?? 'ALL' !! Empty;
 		my $next = self.render-select-core($placeholders, $compound.next);
 		$compound.type.uc, |@type, $next;
-	}
-	multi method render-compound(Placeholders $placeholders, Compound:U --> List) {
-		Empty;
 	}
 
 	multi method render-order-by(Placeholders $placeholders, OrderBy:D $sorters --> List) {
@@ -1673,23 +1651,20 @@ class Renderer::SQL does Renderer {
 		@result;
 	}
 
-	multi method render-lockings(Locking:D $lockings --> Str) {
+	method render-lockings(Locking $lockings --> Str) {
 		$lockings.lockings.map({ self.render-locking($^locking) }).join(', ');
-	}
-	multi method render-lockings(Locking:U $lockings --> List) {
-		Empty;
 	}
 
 
 	method render-select-core(Placeholders $placeholders, Select $select --> Str) {
 		my @parts = 'SELECT';
-		@parts.append: self.render-distinct($placeholders, $select.distinct);
+		@parts.append: self.render-distinct($placeholders, $select.distinct) with $select.distinct;
 		@parts.append: self.render-column-expressions($placeholders, $select.columns);
 		@parts.append: self.render-from($placeholders, $select.source);
 		@parts.append: self.render-conditions($placeholders, $select.where);
-		@parts.append: self.render-group-by($placeholders, $select.group-by, $select.having);
-		@parts.append: self.render-compound($placeholders, $select.compound);
-		@parts.append: self.render-windows($placeholders, $select.windows);
+		@parts.append: self.render-group-by($placeholders, $select.group-by, $select.having) with $select.group-by;
+		@parts.append: self.render-compound($placeholders, $select.compound) with $select.compound;
+		@parts.append: self.render-windows($placeholders, $select.windows) with $select.windows;
 		@parts.join(' ');
 	}
 
@@ -1699,7 +1674,7 @@ class Renderer::SQL does Renderer {
 		@parts.append: self.render-select-core($placeholders, $select);
 		@parts.append: self.render-order-by($placeholders, $select.order-by);
 		@parts.append: self.render-limit-offset($placeholders, $select.limit, $select.offset);
-		@parts.append: self.render-lockings($select.locking);
+		@parts.append: self.render-lockings($select.locking) with $select.locking;
 		@parts.join(' ');
 	}
 
@@ -1714,11 +1689,8 @@ class Renderer::SQL does Renderer {
 		(@common, 'UPDATE', @target, @set, @from, @where, @returning).flat.join(' ');
 	}
 
-	multi method render-overriding(Overriding:D $override) {
+	method render-overriding(Overriding $override) {
 		'OVERRIDING', $override.uc, 'VALUE';
-	}
-	multi method render-overriding(Overriding:U $override) {
-		Empty;
 	}
 
 	method render-values(Placeholders $placeholders, Rows $rows) {
@@ -1736,45 +1708,39 @@ class Renderer::SQL does Renderer {
 		'DEFAULT VALUES';
 	}
 
-	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Columns:D $target) {
+	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Columns $target) {
 		my $columns = self.render-identifiers($target.columns);
 		my @where = self.render-conditions($placeholders, $target.where);
 		$columns, |@where;
 	}
-	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Constraint:D $target) {
+	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Constraint $target) {
 		'ON CONSTRAINT', self.render-identifier($target.constraint);
 	}
-	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target:U $conflict) {
-		Empty;
-	}
 
-	multi method render-conflict(Placeholders $placeholders, Conflict::Nothing:D $conflict) {
-		my @target = self.render-conflict-target($placeholders, $conflict.target);
+	multi method render-conflict(Placeholders $placeholders, Conflict::Nothing $conflict) {
+		my @target = $conflict.target ?? self.render-conflict-target($placeholders, $conflict.target) !! Empty;
 		'ON CONFLICT', |@target, 'DO NOTHING';
 	}
-	multi method render-conflict(Placeholders $placeholders, Conflict::Update:D $conflict) {
+	multi method render-conflict(Placeholders $placeholders, Conflict::Update $conflict) {
 		my @result = 'ON CONFLICT';
-		@result.push: self.render-conflict-target($placeholders, $conflict.target);
+		@result.push: self.render-conflict-target($placeholders, $conflict.target) with $conflict.target;
 		@result.push: 'DO UPDATE SET';
 		@result.push: self.render-expressions($placeholders, $conflict.assignments);
 		@result.push: self.render-conditions($placeholders, $conflict.where);
 		@result;
 	}
 
-	multi method render-conflicts(Placeholders $placeholders, Conflicts:D $conflicts) {
+	method render-conflicts(Placeholders $placeholders, Conflicts $conflicts) {
 		$conflicts.conflicts.flatmap: { self.render-conflict($placeholders, $^conflict) };
-	}
-	multi method render-conflicts(Placeholders $placeholders, Conflicts:U $conflict) {
-		Empty;
 	}
 
 	multi method render-expression(Placeholders $placeholders, Insert $insert, Precedence --> Str) {
 		my @common     = self.render-common-tables($placeholders, $insert.common-tables);
 		my @target     = self.render-table($insert.target);
 		my @columns    = self.render-identifiers($insert.columns);
-		my @overriding = self.render-overriding($insert.overriding);
+		my @overriding = $insert.overriding ?? self.render-overriding($insert.overriding) !! Empty;
 		my @content    = self.render-insert-content($placeholders, $insert);
-		my @conflicts  = self.render-conflicts($placeholders, $insert.conflicts);
+		my @conflicts  = $insert.conflicts ?? self.render-conflicts($placeholders, $insert.conflicts) !! Empty;
 		my @returning  = self.render-column-expressions($placeholders, $insert.returning, 'RETURNING');
 
 		(@common, 'INSERT INTO', @target, @columns, @overriding, @content, @conflicts, @returning).flat.join(' ');
