@@ -1,6 +1,8 @@
 Revision history for SQL-Abstract
 
 {{$NEXT}}
+
+0.0.4  2023-05-25T22:13:45+02:00
     - Allow locking clause to specify multiple tables
     - Allow multiple locking clauses in Select
     - Add pair-pair converter for column

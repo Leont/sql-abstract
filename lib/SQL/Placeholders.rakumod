@@ -2,7 +2,7 @@ unit package SQL;
 
 use SQL::Query;
 
-role Placeholders:ver<0.0.3>:auth<zef:leont> {
+role Placeholders:ver<0.0.4>:auth<zef:leont> {
 	has @.values is built(False);
 	method bind(Any $value) { ... }
 }
