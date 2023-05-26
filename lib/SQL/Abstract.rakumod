@@ -11,15 +11,28 @@ class Op::Not { ... }
 class Identifier { ... }
 class Expression::Renamed { ... }
 
+our proto expand-capture(|) { * }
 role Expression {
 	method precedence(--> Precedence) { ... }
 
 	method negate(--> Expression) {
 		Op::Not.new(:value(self));
 	}
-	method as(Identifier(Cool) $alias) {
+	method as(Identifier(Any) $alias) {
 		Expression::Renamed.new(:source(self), :$alias);
 	}
+
+	multi method COERCE(Capture $capture) {
+		expand-capture(|$capture);
+	}
+}
+
+our proto expand-expression(|) { * }
+multi expand-expression(Expression $expression) {
+	$expression;
+}
+multi expand-expression(Capture $capture) {
+	expand-capture(|$capture);
 }
 
 role Term does Expression {
@@ -31,7 +44,7 @@ class Literal does Expression {
 	has Str:D $.payload is required;
 	has Any:D @.arguments;
 
-	method COERCE(Capture $capture) {
+	multi method COERCE(Capture $capture) {
 		my ($payload, @arguments, *%args) = |$capture;
 		self.new(:$payload, :@arguments, |%args);
 	}
@@ -40,7 +53,7 @@ class Literal does Expression {
 class Integer does Term {
 	has Int $.value;
 
-	method COERCE(Int $value) {
+	multi method COERCE(Int $value) {
 		self.new(:$value);
 	}
 }
@@ -48,9 +61,16 @@ class Integer does Term {
 class Placeholder does Term {
 	has Any $.value;
 
-	method COERCE(Any $value) {
+	multi method COERCE(Any $value) {
 		self.bless(:$value);
 	}
+}
+
+multi expand-expression(Any:D $value) {
+	Placeholder.new(:$value);
+}
+multi expand-capture(Placeholder(Any) :$bind!) {
+	$bind;
 }
 
 role Constant[Str $keyword] does Term {
@@ -63,21 +83,22 @@ role Constant[Str $keyword] does Term {
 }
 
 class Value::Default does Constant['DEFAULT'] {}
+multi expand-capture(Bool :$default!) { Value::Default.new }
 class Value::True    does Constant['TRUE']    {}
+multi expand-capture(Bool :$true!) { Value::True.new }
 class Value::False   does Constant['FALSE']   {}
+multi expand-capture(Bool :$false!) { Value::False.new }
 class Value::Null    does Constant['NULL']    {}
+multi expand-capture(Bool :$null!) { Value::Null.new }
 
-multi expand-expression(Expression $expression) {
-	$expression;
-}
-multi expand-expression(Any:D $value) {
-	Placeholder.new(:$value);
-}
 multi expand-expression(Any:U) {
 	Value::Null.new;
 }
-multi expand-expression(Literal(Capture:D) $literal) {
-	$literal;
+multi expand-capture(Str $payload, *@arguments, *%args) {
+	Literal.new(:$payload, :@arguments, |%args);
+}
+multi expand-capture(:literal($) ($payload, *@arguments), *%args) {
+	Literal.new(:$payload, :@arguments, |%args);
 }
 
 class Identifier does Term {
@@ -107,22 +128,26 @@ class Identifier does Term {
 	}
 }
 
+multi expand-capture(Identifier(Cool) :$ident!) {
+	$ident;
+}
+
 class Expression::Renamed does Expression {
 	method precedence(--> Precedence::Comma) {}
 
 	has Identifier:D $.alias is required;
 	has Expression:D $.source is required;
 
-	method COERCE(Pair (Identifier(Cool) :key($alias), Expression :value($source))) {
+	multi method COERCE(Pair (Identifier(Any) :key($alias), Expression :value($source))) {
 		self.new(:$alias, :$source);
 	}
 
-	method as(Identifier(Cool) $alias) {
+	method as(Identifier(Any) $alias) {
 		Expression::Renamed.new(:$!source, :$alias);
 	}
 }
 
-multi expand-expression(Whatever) {
+multi expand-capture(Bool :$star!) {
 	Identifier.new('*');
 }
 
@@ -140,16 +165,20 @@ role Value::List does Expression {
 class Identifiers does Value::List {
 	has Identifier:D @.elements is required;
 
-	multi method COERCE(Identifier(Cool) $column) {
+	multi method COERCE(Identifier(Any) $column) {
 		self.new(:elements[$column]);
 	}
 	multi method COERCE(@list) {
-		my Identifier(Cool) @elements = @list;
+		my Identifier(Any) @elements = @list;
 		self.new(:@elements);
 	}
 	multi method COERCE(List:U $list) {
 		Identifiers;
 	}
+}
+
+multi expand-capture(Identifiers(Any) :$idents!) {
+	$idents;
 }
 
 class Function { ... }
@@ -178,13 +207,16 @@ class Column::List does Value::List {
 		Identifier.new('*');
 	}
 	multi to-column(Map $map (Str :$function!, Str:D :$over, *%args)) {
-		Function.COERCE({ :name($function), |%args }).over(:existing($over));
+		Function.COERCE({ :name($function), |%args }).over($over);
 	}
 	multi to-column(Map $map (Str :$function!, :%over!, *%args)) {
 		Function.COERCE({ :name($function), |%args }).over(|%over);
 	}
 	multi to-column(Map $map (Str :$function!, *%args)) {
 		Function.COERCE({ :name($function), |%args });
+	}
+	multi to-column(Capture $capture) {
+		expand-capture(|$capture);
 	}
 
 	multi method COERCE(Any $column) {
@@ -197,13 +229,22 @@ class Column::List does Value::List {
 	multi method COERCE(Identifiers $elements) {
 		self.new(:elements($elements.elements));
 	}
+
+	multi method COERCE(Capture $capture) {
+		my $expression = expand-capture(|$capture);
+		$expression ~~ Column::List ?? $expression !! self.new(:elements($expression));
+	}
 }
 
-role Op::Unary does Expression {
-	has Expression:D $.value is required;
+multi expand-capture(Column::List(Any) :$columns!) {
+	$columns;
 }
 
-role Op::Postfix does Op::Unary {
+role Op::HasLeft does Expression {
+	has Expression:D $.left is required;
+}
+
+role Op::Postfix does Op::HasLeft {
 	method precedence(--> Precedence::Postfix) {}
 
 	method postfix(--> Str) { ... }
@@ -215,11 +256,12 @@ class Op::IsNull does Op::Postfix {
 		$!negated ?? 'IS NOT NULL' !! 'IS NULL';
 	}
 	method negate {
-		Op::IsNull.new(:$!value, :negated(!$!negated));
+		Op::IsNull.new(:$!left, :negated(!$!negated));
 	}
 }
 
-role Op::Prefix[Str $operator] does Op::Unary {
+role Op::Prefix[Str $operator] does Expression {
+	has Expression:D $.value is required;
 	method precedence(--> Precedence::Prefix) {}
 	method operator(--> Str:D) { $operator }
 }
@@ -228,12 +270,24 @@ class Op::Positive does Op::Prefix['+'] {}
 class Op::Negative does Op::Prefix['-'] {}
 class Op::Complement does Op::Prefix['~'] {}
 
-class Op::Not does Op::Unary {
+class Op::Not does Op::Prefix['NOT'] {
 	method precedence(--> Precedence::Not) {}
 
 	method negate(--> Bool) {
 		$!value;
 	}
+}
+
+my %prefix-op-for = (
+	'+' => Op::Positive,
+	'-' => Op::Negative,
+	'~' => Op::Complement,
+	'not' => Op::Not,
+);
+
+multi expand-capture(:op(@) (Str $op where { %prefix-op-for{$op}:exists }, $expr)) {
+	my $value = expand-expression($expr);
+	%prefix-op-for{$op}.new(:$value);
 }
 
 role Op::Binary does Expression {
@@ -344,6 +398,14 @@ my %binary-op-for =
 	'distinct'     => Op::Distinct,
 	'not-distinct' => Op::NotDistinct;
 
+multi expand-capture(:op(@) (Str $op where 'like'|'not-like', $left-expr, $right-expr, $escape-expr)) {
+	my $left = expand-expression($left-expr);
+	my $right = expand-expression($right-expr);
+	my $escape = expand-expression($escape-expr);
+	my $class = $op eq 'like' ?? Op::Like !! Op::NotLike;
+	$class.new(:$left, :$right, :$escape);
+}
+
 role Op::BetweenLike[Bool $positive] does Expression {
 	method precedence(--> Precedence::Between) {}
 
@@ -359,6 +421,13 @@ class Op::Between does Op::BetweenLike[True] {
 	method negate() {
 		Op::NotBetween.new(:$!left, :$!min, :$!max);
 	}
+}
+
+multi expand-capture(:op(@) (Str $op where 'between'|'not-between', $column-expr, $left-expr, $right-expr)) {
+	my $column = expand-expression($column-expr);
+	my $left = expand-expression($left-expr);
+	my $right = expand-expression($right-expr);
+	Op::Between.new(:$left, :$right);
 }
 
 role Op::Logical[Str $operator, Precedence $precedence, Constant $empty] does Expression {
@@ -391,52 +460,95 @@ role Op::Logical[Str $operator, Precedence $precedence, Constant $empty] does Ex
 class Op::And does Op::Logical['AND', Precedence::And, Value::True] {}
 class Op::Or  does Op::Logical['OR' , Precedence::Or, Value::False] {}
 
-role Op::In does Expression {
-	method precedence(--> Precedence::In) {}
-	method expression() { ... }
+multi expand-capture(:@and) {
+	my @elements = @and.map: { expand-expression($^item) };
+	Op::And.pack(@elements);
+}
+multi expand-capture(:@or) {
+	my @elements = @or.map: { expand-expression($^item) };
+	Op::Or.pack(@elements);
+}
 
-	has Expression:D $.left is required;
+
+role Op::InLike does Expression {
+	method precedence(--> Precedence::In) {}
+}
+
+role Op::In does Op::InLike does Op::HasLeft {
 	has Bool $.negated;
 }
 
 class Op::In::List does Op::In {
-	has Value::List:D $.expression is required handles<elements>;
+	has Value::List:D $.values is required handles<elements>;
 
 	submethod BUILD(Expression :$!left, :@elements, Bool :$!negated = False) {
-		$!expression = Column::List.new(:@elements);
+		$!values = Column::List.COERCE(@elements);
 	}
 
 	method negate() {
-		self.bless(:$!left, :$!expression, :negated(!$!negated));
+		self.bless(:$!left, :$!values, :negated(!$!negated));
 	}
 }
 
 role Query { ... }
+class Select { ... }
 
-class Op::In::Query does Op::In {
+role Op::Subquery does Op::InLike {
 	has Query:D $.query is required;
-	method expression() { $!query }
+	method operator() { ... }
+}
+
+class Op::In::Query does Op::In does Op::Subquery {
+	method operator { $!negated ?? 'NOT IN' !! 'IN' }
 
 	method negate() {
 		self.new($!left, $!query, :negated(!$!negated));
 	}
 }
 
-class Op::Exists does Expression {
-	method precedence(--> Precedence::In) {}
+multi expand-capture(:@op ('in', $left-expr, Capture (Select(Map) :$select!))) {
+	my $left = expand-expression($left-expr);
+	Op::In::Query.new(:$left, :query($select));
+}
+multi expand-capture(:@op ('in', $left-expr, *@args)) {
+	my $left = expand-expression($left-expr);
+	my @elements = @args.map: { expand-expression($^item) };
+	Op::In::List.new(:$left, :@elements);
+}
+multi expand-capture(:@op ('not-in', $left-expr, Capture (Select(Map) :$select!))) {
+	my $left = expand-expression($left-expr);
+	Op::In::Query.new(:$left, :query($select), :negated);
+}
+multi expand-capture(:@op ('not-in', $left-expr, *@args)) {
+	my $left = expand-expression($left-expr);
+	my @elements = @args.map: { expand-expression($^item) };
+	Op::In::List.new(:$left, :@elements, :negated);
+}
 
-	has Expression:D $.left is required;
-	has Query:D $.query is required;
+class Op::Exists does Op::Subquery {
 	has Bool $.negated;
+	method operator() { $!negated ?? 'NOT EXISTS' !! 'EXISTS' }
 
 	method negate() {
-		self.new(:$!left, :$!query, :negated(!$!negated));
+		self.new(:$!query, :negated(!$!negated));
 	}
+}
+
+multi expand-capture(Select(Map) :$exists) {
+	Op::Exists.new(:query($exists));
+}
+multi expand-capture(Select(Map) :$not-exists) {
+	Op::Exists.new(:query($not-exists), :negated);
 }
 
 class Op::Cast does Term {
 	has Expression:D $.primary is required;
 	has Str:D $.typename is required;
+}
+
+multi expand-capture(:@op ('cast', Any $expression, Str $typename)) {
+	my $primary = expand-expression($expression);
+	Op::Cast.new(:$primary, $typename);
 }
 
 class Op::Case does Expression {
@@ -445,15 +557,46 @@ class Op::Case does Expression {
 	has Expression $.left;
 	class When {
 		has Expression:D $.condition is required;
-		has Expression:D $.value is required;
+		has Expression:D $.then is required;
+
+		method COERCE(Pair $pair) {
+			my $condition = expand-expression($pair.key);
+			my $then = expand-expression($pair.value);
+			Op::Case::When.new(:$condition, :$then);
+		}
 	}
 	has When:D @.whens;
 	has Expression $.else;
 }
 
+multi expand-capture(:@case is copy) {
+	my $left = @case[0] !~~ Pair ?? expand-expression(@case.shift) !! Expression;
+	my $else = @case[*-1] !~~ Pair ?? expand-expression(@case.pop) !! Expression;
+	my Op::Case::When(Pair) @whens = @case;
+	Op::Case.new(:$left, :@whens, :$else);
+}
+multi expand-capture(:op(@case) where @case[0] eq 'case') {
+	my ($case, $left-expr, @args) = |@case;
+	my $left = expand-expression($left-expr);
+	my $else = @args[*-1] !~~ Pair ?? expand-expression(@args.pop) !! Expression;
+	my Op::Case::When(Pair) @whens = @args;
+	Op::Case.new(:$left, :@whens, :$else);
+}
+
+multi expand-capture(:op(@) (Str $key, $left-expr, $right-expr)) {
+	my Op::Binary:U $class = %binary-op-for{$key}:exists ?? %binary-op-for{$key} !! Op::Comperative[$key];
+	my $left = expand-expression($left-expr);
+	my $right = expand-expression($right-expr);
+	$class.new(:$left, :$right);
+}
+
 class Current does Expression {
 	method precedence(--> Precedence::Between) {}
 	has Identifier:D $.cursor is required;
+}
+
+multi expand-capture(Identifier(Any) :$current!) {
+	Current.new(:cursor($current));
 }
 
 role Conditional {
@@ -477,32 +620,40 @@ role Conditional {
 }
 
 class Conditions does Conditional {
+	multi expand-partial(Expression $left, Capture:D (:@op) ) {
+		my ($op, *@args) = @op;
+		my $capture = \(:op[ $op, $left, |@args ]);
+		expand-capture(|$capture);
+	}
+	multi expand-partial(Expression $left, Capture:D $capture (Bool :$null)) {
+		Op::IsNull.new(:$left, :negated(!$null));
+	}
+	multi expand-partial(Expression $left, Capture:D $capture) {
+		Op::Equals.new(:$left, :right(expand-capture(|$capture)));
+	}
 	multi expand-partial(Expression $left, Any:D $expression) {
 		Op::Equals.new(:$left, :right(expand-expression($expression)));
 	}
-	multi expand-partial(Expression $value, Any:U $) {
-		Op::IsNull.new(:$value);
+	multi expand-partial(Expression $left, Any:U $) {
+		Op::IsNull.new(:$left);
 	}
 	multi expand-partial(Expression $left, Constant:U $constant) {
 		Op::Equals.new(:$left, :right($constant.new));
 	}
-	multi expand-partial(Expression $value, Constant $constant where Value::Null) {
-		Op::IsNull.new(:$value);
+	multi expand-partial(Expression $left, Constant $constant where Value::Null) {
+		Op::IsNull.new(:$left);
 	}
 
-	multi expand-pair(Expression $value, 'isnull', $) {
-		Op::IsNull.new(:$value);
+	multi expand-pair(Expression $left, 'isnull', Bool $positive) {
+		Op::IsNull.new(:$left, :negated(!$positive));
 	}
-	multi expand-pair(Expression $value, 'isnotnull', $) {
-		Op::IsNull.new(:$value, :negated);
+	multi expand-pair(Expression $left, 'isnotnull', Bool $positive) {
+		Op::IsNull.new(:$left, :negated(!$positive));
 	}
 	multi expand-pair(Expression $left, Str $key, Any:D $value) {
 		my $right = expand-expression($value);
-		if %binary-op-for{$key}:exists {
-			%binary-op-for{$key}.new(:$left, :$right);
-		} else {
-			Op::Comperative[$key].new(:$left, :$right);
-		}
+		my $class = %binary-op-for{$key}:exists ?? %binary-op-for{$key} !! Op::Comperative[$key];
+		$class.new(:$left, :$right);
 	}
 	multi expand-partial(Expression $left, Pair (:$key, :$value)) {
 		expand-pair($left, $key, $value);
@@ -544,7 +695,7 @@ class Conditions does Conditional {
 		expand-junction($left, $type, @eigenstates.map({ expand-partial($left, $^value) }));
 	}
 
-	multi expand-condition(Pair (Identifier(Cool) :$key, Mu :$value)) {
+	multi expand-condition(Pair (Identifier(Any) :$key, Mu :$value)) {
 		expand-partial($key, $value);
 	}
 	multi expand-condition(Pair (Expression :$key, Mu :$value)) {
@@ -555,15 +706,18 @@ class Conditions does Conditional {
 		self.bless(:$expression);
 	}
 	multi method COERCE(Pair $pair) {
-		self.new(:expressions[expand-condition($pair)]);
+		my @expressions = expand-condition($pair);
+		self.new(:@expressions);
 	}
 	multi method COERCE(@list) {
-		self.new(:expressions(@list.map(&expand-condition)));
+		my @expressions = @list.flatmap(&expand-condition);
+		self.new(:@expressions);
 	}
 	multi method COERCE(%hash) {
 		samewith(%hash.sort);
 	}
-	multi method COERCE(Literal(Capture) $expression) {
+	multi method COERCE(Capture $capture) {
+		my $expression = expand-capture(|$capture);
 		self.bless(:$expression);
 	}
 }
@@ -580,13 +734,13 @@ class Order::Modifier does Expression {
 	multi method COERCE(Pair (Expression:D :key($column), Sorting(Str) :value($order))) {
 		self.new(:$column, :$order);
 	}
-	multi method COERCE(Pair (Identifier:D(Cool:D) :key($column), Sorting(Str) :value($order))) {
+	multi method COERCE(Pair (Identifier:D(Any:D) :key($column), Sorting(Str) :value($order))) {
 		self.new(:$column, :$order);
 	}
 	multi method COERCE(Map (Expression:D :$column, Sorting(Str) :$order, Nulls(Str) :$nulls)) {
 		self.new(:$column, :$order, :$nulls);
 	}
-	multi method COERCE(Map (Identifier:D(Cool:D) :$column, Sorting(Str) :$order, Nulls(Str) :$nulls)) {
+	multi method COERCE(Map (Identifier:D(Any:D) :$column, Sorting(Str) :$order, Nulls(Str) :$nulls)) {
 		self.new(:$column, :$order, :$nulls);
 	}
 }
@@ -598,6 +752,9 @@ class OrderBy {
 		$expression;
 	}
 	multi to-sorter(Identifier:D(Cool:D) $ident) {
+		$ident;
+	}
+	multi to-sorter(Identifier:D(Capture:D) $ident) {
 		$ident;
 	}
 	multi to-sorter(Order::Modifier:D(Pair:D) $modifier) {
@@ -619,16 +776,20 @@ class OrderBy {
 class Row does Value::List {
 	has Expression @.elements is required;
 
-	method COERCE(@values) {
+	multi method COERCE(@values) {
 		my Expression @elements = @values.map(&expand-expression);
 		self.new(:@elements);
 	}
 }
 
+multi expand-capture(Row(List) :$row!) {
+	$row;
+}
+
 class Rows {
 	has Row @.elements is required;
 
-	method COERCE(@input) {
+	multi method COERCE(@input) {
 		my Row(Any) @elements = @input;
 		self.new(:@elements);
 	}
@@ -641,7 +802,12 @@ class Assigns {
 		my $expression = expand-expression($value);
 		$key => $expression;
 	}
-	multi transform-pair(Pair (Identifier(Cool) :$key, :$value)) {
+	multi transform-pair(Pair (Capture :$key, :$value)) {
+		my $ident = expand-expression($key);
+		my $expression = expand-expression($value);
+		$ident => $expression;
+	}
+	multi transform-pair(Pair (Identifier(Any) :$key, :$value)) {
 		my $expression = expand-expression($value);
 		$key => $expression;
 	}
@@ -686,7 +852,7 @@ class Function does Expression {
 	has OrderBy $.order-by;
 	has Conditions $.filter;
 
-	method COERCE(Map (Str :$name!, Column::List:D(Any:D) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
+	multi method COERCE(Map (Str :$name!, Column::List:D(Any:D) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
 		Function.new(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
 	}
 
@@ -694,14 +860,28 @@ class Function does Expression {
 		$!filter ?? Precedence::Between !! Precedence::Termlike;
 	}
 
-	method over(*%arguments) {
+	multi method over(Str:D $existing) {
+		my $window = Window::Definition.COERCE(:$existing);
+		Window::Function.new(:function(self), :$window);
+	}
+	multi method over(*%arguments) {
 		my $window = Window::Definition.COERCE(%arguments);
 		Window::Function.new(:function(self), :$window);
 	}
 
-	method as(Identifier:D(Cool:D) $alias, Identifiers(Cool) $columns?, Bool :$lateral, Bool :$ordinal) {
+	method as(Identifier:D(Any:D) $alias, Identifiers(Cool) $columns?, Bool :$lateral, Bool :$ordinal) {
 		Source::Function.new(:function(self), :$alias, :$columns, :$lateral, :$ordinal);
 	}
+}
+
+multi expand-capture(Function(Map) :$function!) {
+	$function;
+}
+multi expand-capture(Map :function($)! (Str :$over, *%args)) {
+	Function.COERCE(%args).over($over);
+}
+multi expand-capture(Map :function($)! (:%over, *%args)) {
+	Function.COERCE(%args).over(|%over);
 }
 
 package Window {
@@ -759,7 +939,7 @@ package Window {
 			$!existing && !$!partition-by && !$!order-by && !$!frame;
 		}
 
-		method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Cool) :$existing, Boundary(Any) :$from = Boundary::Preceding::Unbounded.new, Boundary(Any) :$to, Exclusion(Str) :$exclude = Exclusion::NoOthers, Mode(Str) :$mode = Mode::Range)) {
+		method COERCE(Map (Column::List(Any) :$partition-by, OrderBy(Any) :$order-by, Identifier(Any) :$existing = Identifier, Boundary(Any) :$from = Boundary::Preceding::Unbounded.new, Boundary(Any) :$to, Exclusion(Str) :$exclude = Exclusion::NoOthers, Mode(Str) :$mode = Mode::Range)) {
 			my $default-frame = $from ~~ Boundary::Preceding::Unbounded && !$to && $mode === Mode::Range && $exclude === Exclusion::NoOthers;
 			my $frame = $default-frame ?? Frame !! Frame.new(:$mode, :$from, :$to, :$exclude);
 			self.new(:$existing, :$partition-by, :$order-by, :$frame);
@@ -770,7 +950,7 @@ package Window {
 		has Identifier:D         $.name is required;
 		has Window::Definition:D $.definition is required;
 
-		method COERCE(Pair (Identifier(Cool) :$key, Window::Definition(Map) :$value)) {
+		method COERCE(Pair (Identifier(Any) :$key, Window::Definition(Map) :$value)) {
 			self.new(:name($key), :definition($value));
 		}
 	}
@@ -827,8 +1007,6 @@ class Locking {
 	}
 }
 
-class Select { ... }
-
 class Compound {
 	enum Type <Union Intersect Except>;
 	has Type:D $.type = Type::Union;
@@ -876,11 +1054,11 @@ role Query does Expression {
 
 	method create(|) { ... }
 
-	method COERCE(%arguments) {
+	multi method COERCE(%arguments) {
 		self.create(|%arguments);
 	}
 
-	method as(Identifier:D(Cool:D) $alias, Bool :$lateral) {
+	method as(Identifier:D(Any:D) $alias, Bool :$lateral) {
 		Source::Query.new(:query(self), :$alias, :$lateral);
 	}
 }
@@ -903,10 +1081,10 @@ class Common {
 		has Identifier:D $.name is required;
 		has Identifiers $.columns;
 
-		multi method COERCE(Identifier:D(Cool:D) $name) {
+		multi method COERCE(Identifier:D(Any:D) $name) {
 			self.new(:$name);
 		}
-		multi method COERCE(Pair $pair (Identifier(Cool) :key($name), Identifiers(Cool) :value($columns))) {
+		multi method COERCE(Pair $pair (Identifier(Any) :key($name), Identifiers(Cool) :value($columns))) {
 			self.new(:$name, :$columns);
 		}
 	}
@@ -948,7 +1126,7 @@ role Distinction {
 	multi method COERCE(Bool $value) {
 		$value ?? Distinction::Full.new !! Distinction;
 	}
-	multi method COERCE(Column::List(Cool) $columns) {
+	multi method COERCE(Column::List(Any) $columns) {
 		Distinction::Columns.new(:$columns);
 	}
 }
@@ -1017,6 +1195,10 @@ class Select does Query::Common {
 	}
 }
 
+multi expand-capture(Select(Map) :$select!) {
+	$select;
+}
+
 class Update does Query::Common {
 	has Table:D      $.target is required;
 	has Op::Assign:D @.assignments;
@@ -1042,10 +1224,10 @@ role Conflict::Target {
 	multi method COERCE(Pair (:$key where 'columns', Identifiers:D(Cool:D) :$value)) {
 		Conflict::Target::Columns.new(:columns($value));
 	}
-	multi method COERCE(Pair (:$key where 'columns', Map :value($) (Identifiers:D(Any:D) :$columns, Conditions(Any) :$where))) {
+	multi method COERCE(Pair (:$key where 'columns', Map :value($) (Identifiers:D(Cool:D) :$columns, Conditions(Any) :$where))) {
 		Conflict::Target::Columns.new(:$columns, :$where);
 	}
-	multi method COERCE(Pair (:$key where 'constraint', Identifier:D(Cool:D) :$value)) {
+	multi method COERCE(Pair (:$key where 'constraint', Identifier:D(Any:D) :$value)) {
 		Conflict::Target::Constraint.new(:constraint($value));
 	}
 }
@@ -1163,34 +1345,37 @@ role Source {
 		Table::Simple.new(:$name);
 	}
 
-	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Query:D :$value)) {
+	multi method COERCE(Pair (Identifier:D(Any:D) :$key, Query:D :$value)) {
 		Source::Query.new(:query($value), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Map :$value (:$source!, *%args))) {
+	multi method COERCE(Pair (Identifier:D(Any:D) :$key, Map:D :$value (:$source!, *%args))) {
 		my $query = Select.create(|$value);
 		Source::Query.new(:query($query), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Function:D :$value)) {
+	multi method COERCE(Pair (Identifier:D(Any:D) :$key, Function:D :$value)) {
 		Source::Function.new(:function($value), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Map:D :$value ( :function($name)!, *%args ))) {
+	multi method COERCE(Pair (Identifier:D(Any:D) :$key, Map:D :$value ( :function($name)!, *%args ))) {
 		my Function(Map) $function = { :$name, |%args };
 		Source::Function.new(:$function, :alias($key));
 	}
-	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Identifier(Cool) :$value)) {
+	multi method COERCE(Pair (Identifier:D(Any:D) :$key, Identifier(Any) :$value)) {
 		Table::Renamed.new(:name($value), :alias($key));
 	}
+	multi method COERCE(Pair (Identifier:D(Any:D) :$key, Capture :$value)) {
+		self.COERCE(($key => expand-capture(|$value)));
+	}
 	
-	multi method COERCE(Map (Identifier:D(Cool:D) :table($name), Identifier:D(Cool:D) :$alias, Identifiers(Cool) :$columns, Bool :$only)) {
+	multi method COERCE(Map (Identifier:D(Any:D) :table($name), Identifier:D(Cool:D) :$alias, Identifiers(Cool) :$columns, Bool :$only)) {
 		Table::Renamed.new(:$name, :$alias, :$columns, :$only);
 	}
-	multi method COERCE(Map (Identifier:D(Cool:D) :table($name)!, Bool :$only)) {
+	multi method COERCE(Map (Identifier:D(Any:D) :table($name)!, Bool :$only)) {
 		Table::Simple.new(:$name, :$only);
 	}
-	multi method COERCE(Map (Function:D(Map:D) :$function, Identifier:D(Cool:D) :$alias, Identifiers() :$columns, Bool :$lateral, Bool :$ordinal)) {
+	multi method COERCE(Map (Function:D(Map:D) :$function, Identifier:D(Any:D) :$alias, Identifiers() :$columns, Bool :$lateral, Bool :$ordinal)) {
 		Source::Function.new(:$function, :$alias, :$columns, :$lateral, :$ordinal);
 	}
-	multi method COERCE(Map (Select:D(Map:D) :$query, Identifier:D(Cool:D) :$alias, Identifiers() :$columns, Bool :$lateral)) {
+	multi method COERCE(Map (Select:D(Map:D) :$query, Identifier:D(Any:D) :$alias, Identifiers() :$columns, Bool :$lateral)) {
 		Source::Query.new(:query($query), :$alias, :$columns, :$lateral);
 	}
 	multi method COERCE(Map (Source:D(Any:D) :$left!, Source:D(Any:D) :$right!, *%args)) {
@@ -1244,7 +1429,7 @@ role Join does Source {
 }
 
 class Join::Conditions does Conditional {
-	sub expand(Pair (Identifier(Cool) :key($left), Identifier(Cool) :value($right))) {
+	sub expand(Pair (Identifier(Any) :key($left), Identifier(Cool) :value($right))) {
 		Op::Equals.new(:$left, :$right);
 	}
 
@@ -1362,8 +1547,8 @@ class Renderer::SQL does Renderer {
 	}
 	method render-when(Placeholders $placeholders, Op::Case::When $when --> List) {
 		my $condition = self.render-expression($placeholders, $when.condition, Precedence::Comma);
-		my $value     = self.render-expression($placeholders, $when.value, Precedence::Comma);
-		'WHEN', $condition, 'THEN', $value;
+		my $then      = self.render-expression($placeholders, $when.then, Precedence::Comma);
+		'WHEN', $condition, 'THEN', $then;
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Case $case, Precedence $ --> Str) {
 		my @result = 'CASE';
@@ -1391,24 +1576,29 @@ class Renderer::SQL does Renderer {
 		@result.join(' ');
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Postfix $op, Precedence --> Str) {
-		my $value = self.render-expression($placeholders, $op.value, Precedence::Postfix);
+		my $value = self.render-expression($placeholders, $op.left, Precedence::Postfix);
 		"$value $op.postfix()";
 	}
 	multi method render-expression(Placeholders $placeholders, Op::Not $op, Precedence --> Str) {
 		my $primary = self.render-expression($placeholders, $op.value, Precedence::Not);
 		"NOT $primary";
 	}
-	multi method render-expression(Placeholders $placeholders, Op::In $in, Precedence --> Str) {
+	multi method render-expression(Placeholders $placeholders, Op::In::List $in, Precedence --> Str) {
 		my $left = self.render-expression($placeholders, $in.left, $in.precedence);
-		my $candidates = self.render-expression($placeholders, $in.expression, Precedence::Comma);
+		my $candidates = self.render-expression($placeholders, $in.values, Precedence::Comma);
 		my $operator = $in.negated ?? 'NOT IN' !! 'IN';
 		"$left $operator $candidates";
 	}
+	multi method render-expression(Placeholders $placeholders, Op::Subquery $subquery, Precedence --> Str) {
+		my $left = self.render-expression($placeholders, $subquery.left, $subquery.precedence);
+		my $candidates = self.render-expression($placeholders, $subquery.query, Precedence::Comma);
+		my $operator = $subquery.operator;
+		"$left $operator $candidates";
+	}
 	multi method render-expression(Placeholders $placeholders, Op::Exists $in, Precedence --> Str) {
-		my $left = self.render-expression($placeholders, $in.left, $in.precedence);
 		my $candidates = self.render-expression($placeholders, $in.query, Precedence::Comma);
 		my $operator = $in.negated ?? 'NOT EXISTS' !! 'EXISTS';
-		"$left $operator $candidates";
+		"$operator $candidates";
 	}
 	multi method render-expression(Placeholders $placeholders, Op::BetweenLike $between, Precedence --> Str) {
 		my $left = self.render-expression($placeholders, $between.left, Precedence::Between);
@@ -1858,10 +2048,10 @@ method commit() {
 
 
 proto table(|) is export(:functions) { * }
-multi table(Any:D $table, Identifier(Cool) :$as!, Identifiers(Any) :$columns = Identifiers, Bool :$only) {
+multi table(Any:D $table, Identifier(Any) :$as!, Identifiers(Any) :$columns = Identifiers, Bool :$only) {
 	Table.COERCE({ :$table, :alias($as), :$columns, :$only });
 }
-multi table(Identifier(Cool) $name) {
+multi table(Identifier(Any) $name) {
 	Table::Simple.new(:$name);
 }
 
@@ -1891,7 +2081,7 @@ sub function(Str $name, Column::List:D(Any:D) $arguments = (), Conditions(Any) :
 	Function.new(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
 }
 
-sub value(Any $value) is export(:functions) {
+our sub value(Any $value) is export(:functions) {
 	expand-expression($value);
 }
 
@@ -1933,7 +2123,7 @@ my $query = $abstract.select('table', <foo bar>, :id(3));
 my $result = $dbh.query($result.sql, $result.arguments);
 
 my $join = { :left<books>, :right<authors>, :using<author_id> };
-my $result = $abstract.select($join, ['books.name', 'authors.name'], { 'cost' => { '<' => 10 }});
+my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost('<' => 10) });
 
 =end code
 
@@ -2192,7 +2382,7 @@ This will check if the left expression is C<NULL>; C<:left(Any)> equals C<left I
 
 =head3 Pair
 
-This will use the key as operator to compare left against another value or expression. E.g. C<:left('<' => 42)> renders like C<< left < 42 >>. The following keys are known:
+This will use the key as operator to compare left against another value or expression. E.g. C<< :left('<' => 42) >> renders like C<< left < 42 >>. The following keys are known:
 
 =item C<=>
 =item C<!=>
@@ -2234,7 +2424,7 @@ This will check against the values in the function. E.g. C<:left(1|2|4)> will re
 
 =head3 Capture
 
-This will be used as a literal value. E.g. C<:left(\'NOW()')> will render like C<left = NOW()>.
+This will be expanded as a capture expression (. E.g. C<:left(\'NOW()')> will render like C<left = NOW()>. If it's an C<:op> expression, the column will be inserted as first/left operand: C<< :left(\(:op('<' => 42))) >> renders like C<< left < 42 >>.
 
 =head3 Any
 
@@ -2362,6 +2552,157 @@ my Windows::Clauses $clauses =
 #   foo as (PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES)
 
 =end code
+
+=head1 Capture expressions
+
+Captures can be used in most places where Expressions can be used. They allow for SQL expressions that can't be encoded using simpler values.
+
+There are two kinds of capture expressions. The first kind has one or more named arguments; the first will be used as literal SQL, the rest will be arguments for the literal. E.g. C<\'NOW()'>.
+
+The second kind takes a single named argument that may or may not contain a value. Currently supported are:
+
+=begin item1
+Any :$bind
+
+This represents a placeholder variable with the given value
+=end item1
+
+=begin item1
+Bool :$default
+
+This represents the C<DEFAULT> keyword
+=end item1
+
+=begin item1
+Bool :$true
+
+This represents the C<TRUE> keyword
+=end item1
+
+=begin item1
+Bool :$false
+
+This represents the C<FALSE> keyword
+=end item1
+
+=begin item1
+Bool :$null
+
+This represents the C<NULL> keyword
+=end item1
+
+=begin item1
+Cool :$ident
+
+This represents an identifier (typically a column or table name)
+=end item1
+
+=begin item1
+Bool :$star
+
+This represents a C<*>.
+=end item1
+
+=begin item1
+Any :$idents
+
+This represents a list of identifiers
+=end item1
+
+=begin item1
+Any :$columns
+
+This represents a list of column expressions
+=end item1
+
+=begin item1
+:op(@) ('not'|'+'|'-'|'~', Any $expr)
+
+This represents a unary operator (C<NOT>, C<+>, C<->, C<~>).
+=end item1
+
+=begin item1
+:op(@) ('like'|'not-like', Any $left-expr, Any $right-expr, Any $escape-expr)
+
+This represents a C<LIKE> operator, e.h. C<column LIKE '%foo?' ESCAPE '\\'>
+=end item1
+
+=begin item1
+:op(@) ('between'|'not-between', Any $column-expr, Any $left-expr, Any $right-expr)
+
+This represents a C<BETWEEN> expression.
+=end item1
+
+=begin item1
+:@and
+
+This represents an AND expresssion. Typically the contents of this will be further capture expressions.
+=end item1
+
+=begin item1
+:@or
+
+This represents an OR expresssion. Typically the contents of this will be further capture expressions.
+=end item1
+=begin item1
+:@op ('in'|'not-in', Any $left-expr, Capture $ (SQL::Abstract::Select(Map) :$select!))
+
+This represents an <IN> expression with subquery. E.g. C<foo in (SELECT bar from baz where baz.id = table.id)>.
+=end item1
+
+=begin item1
+:@op ('in'|'not-in', Any $left-expr, *@args)
+
+This represents an <IN> expression with list. E.g. C<foo in (1, 2, 3)>.
+=end item1
+
+=begin item1
+Select(Map) :$exists
+
+This represents an C<EXISTS> expression. E.g. C<\(:exists{ :source<table>, columns<1>, :where{ :id(\(:ident<outer.id>)) }> for C<EXISTS(SELECT 1 FROM table WHERE id = outer.id>.
+=end item1
+
+=begin item1
+Select(Map) :$not-exists
+
+This is like :exists, but negated.
+=end item1
+
+=begin item1
+:@op ("cast", Any $expression, Str $typename)
+
+This is a <CAST> expression. E.g. C<CAST(columns AS INTEGER)>.
+=end item1
+
+=begin item1
+:op(@) (Str $key, Any $left-expr, Any $right-expr)
+
+Any binary operator applied to two expressions.
+=end item1
+
+=begin item1
+Identifier(Any) :$current
+
+This represents a C<CURRENT FOR cursor_name> clause, typically used in an C<UPDATE> or C<DELETE> statement.
+=end item1
+
+=begin item1
+List :$row
+
+This represents a row expression, e.g. C<(a, b, c)>.
+=end item1
+
+=begin item1
+Function(Map) :$function
+
+This represents a function call.
+=end item1
+
+=begin item1
+Select(Map) :$select
+
+This represents a subquery expression.
+=end item1
 
 =head1 Author
 

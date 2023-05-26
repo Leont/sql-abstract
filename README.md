@@ -16,7 +16,7 @@ my $query = $abstract.select('table', <foo bar>, :id(3));
 my $result = $dbh.query($result.sql, $result.arguments);
 
 my $join = { :left<books>, :right<authors>, :using<author_id> };
-my $result = $abstract.select($join, ['books.name', 'authors.name'], { 'cost' => { '<' => 10 }});
+my $result = $abstract.select($join, ['books.name', 'authors.name'], { :cost('<' => 10) });
 ```
 
 Description
@@ -244,7 +244,7 @@ This will check if the left expression is `NULL`; `:left(Any)` equals `left IS N
 
 ### Pair
 
-This will use the key as operator to compare left against another value or expression. E.g. `:left('<' => 42)` renders like `left < 42 `. The following keys are known:
+This will use the key as operator to compare left against another value or expression. E.g. `:left('<' => 42) ` renders like `left < 42 `. The following keys are known:
 
   * `=`
 
@@ -310,7 +310,7 @@ This will check against the values in the function. E.g. `:left(1|2|4)` will ren
 
 ### Capture
 
-This will be used as a literal value. E.g. `:left(\'NOW()')` will render like `left = NOW()`.
+This will be expanded as a capture expression (. E.g. `:left(\'NOW()')` will render like `left = NOW()`. If it's an `:op` expression, the column will be inserted as first/left operand: `:left(\(:op('<' => 42))) ` renders like `left < 42 `.
 
 ### Any
 
@@ -430,6 +430,111 @@ my Windows::Clauses $clauses =
 #   over5 AS (ROWS 5 PRECEDING),
 #   foo as (PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES)
 ```
+
+Capture expressions
+===================
+
+Captures can be used in most places where Expressions can be used. They allow for SQL expressions that can't be encoded using simpler values.
+
+There are two kinds of capture expressions. The first kind has one or more named arguments; the first will be used as literal SQL, the rest will be arguments for the literal. E.g. `\'NOW()'`.
+
+The second kind takes a single named argument that may or may not contain a value. Currently supported are:
+
+  * Any :$bind
+
+    This represents a placeholder variable with the given value
+
+  * Bool :$default
+
+    This represents the `DEFAULT` keyword
+
+  * Bool :$true
+
+    This represents the `TRUE` keyword
+
+  * Bool :$false
+
+    This represents the `FALSE` keyword
+
+  * Bool :$null
+
+    This represents the `NULL` keyword
+
+  * Cool :$ident
+
+    This represents an identifier (typically a column or table name)
+
+  * Bool :$star
+
+    This represents a `*`.
+
+  * Any :$idents
+
+    This represents a list of identifiers
+
+  * Any :$columns
+
+    This represents a list of column expressions
+
+  * :op(@) ('not'|'+'|'-'|'~', Any $expr)
+
+    This represents a unary operator (`NOT`, `+`, `-`, `~`).
+
+  * :op(@) ('like'|'not-like', Any $left-expr, Any $right-expr, Any $escape-expr)
+
+    This represents a `LIKE` operator, e.h. `column LIKE '%foo?' ESCAPE '\\'`
+
+  * :op(@) ('between'|'not-between', Any $column-expr, Any $left-expr, Any $right-expr)
+
+    This represents a `BETWEEN` expression.
+
+  * :@and
+
+    This represents an AND expresssion. Typically the contents of this will be further capture expressions.
+
+  * :@or
+
+    This represents an OR expresssion. Typically the contents of this will be further capture expressions.
+
+  * :@op ('in'|'not-in', Any $left-expr, Capture $ (SQL::Abstract::Select(Map) :$select!))
+
+    This represents an <IN> expression with subquery. E.g. `foo in (SELECT bar from baz where baz.id = table.id)`.
+
+  * :@op ('in'|'not-in', Any $left-expr, *@args)
+
+    This represents an <IN> expression with list. E.g. `foo in (1, 2, 3)`.
+
+  * Select(Map) :$exists
+
+    This represents an `EXISTS` expression. E.g. `\(:exists{ :source<table>, columns<1>, :where{ :id(\(:ident<outer.id>)) }` for `EXISTS(SELECT 1 FROM table WHERE id = outer.id`.
+
+  * Select(Map) :$not-exists
+
+    This is like :exists, but negated.
+
+  * :@op ("cast", Any $expression, Str $typename)
+
+    This is a <CAST> expression. E.g. `CAST(columns AS INTEGER)`.
+
+  * :op(@) (Str $key, Any $left-expr, Any $right-expr)
+
+    Any binary operator applied to two expressions.
+
+  * Identifier(Any) :$current
+
+    This represents a `CURRENT FOR cursor_name` clause, typically used in an `UPDATE` or `DELETE` statement.
+
+  * List :$row
+
+    This represents a row expression, e.g. `(a, b, c)`.
+
+  * Function(Map) :$function
+
+    This represents a function call.
+
+  * Select(Map) :$select
+
+    This represents a subquery expression.
 
 Author
 ======

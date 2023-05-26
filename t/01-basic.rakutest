@@ -47,15 +47,18 @@ is-deeply $select-simple10, result('SELECT bar, baz FROM my_table WHERE foo = $1
 my $select-simple11 = $abstract.select('my_table', 'bar', (:1foo, :1bar));
 is-deeply $select-simple11, result('SELECT bar FROM my_table WHERE foo = $1 AND bar = $2', [1, 1]);
 
-my $like = SQL::Abstract::Op::Like.new(:left(identifier('foo')), :right(value('foo%')), :escape(value('\\')));
+my $like = \(:op[ 'like' , \(:ident<foo>), 'foo%', '\\']);
 my $select-simple12 = $abstract.select('my_table', <bar baz>, $like);
 is-deeply $select-simple12, result('SELECT bar, baz FROM my_table WHERE foo LIKE $1 ESCAPE $2', ['foo%', '\\']);
 
-my $select-simple13 = $abstract.select('my_table', <bar baz>, { :foo(SQL::Abstract::Value::False) });
+my $select-simple13 = $abstract.select('my_table', <bar baz>, { :foo(\(:false)) });
 is-deeply $select-simple13, result('SELECT bar, baz FROM my_table WHERE foo = FALSE', []);
 
-my $select-simple14 = $abstract.select('my_table', <bar baz>, { :foo(SQL::Abstract::Value::Null) });
+my $select-simple14 = $abstract.select('my_table', <bar baz>, { :foo(\(:null)) });
 is-deeply $select-simple14, result('SELECT bar, baz FROM my_table WHERE foo IS NULL', []);
+
+my $select-simple15 = $abstract.select('my_table', <bar baz>, { :foo(\(:op('in', 1, 2, 3))) });
+is-deeply $select-simple15, result('SELECT bar, baz FROM my_table WHERE foo IN ($1, $2, $3)', [1, 2, 3]);
 
 
 my $select-type1 = $abstract.select('my_table', <bar baz>, { :foo });
@@ -79,7 +82,7 @@ is-deeply $select-rename2, result('SELECT bar, baz FROM quz AS my_table WHERE fo
 my $select-subselect1 = $abstract.select({ :query{ :source<other_table>, :where{ :bar{ '>' => 3 } } }, :alias<new_name> }, <bar baz>, { :foo('<' => 4) });
 is-deeply $select-subselect1, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new_name WHERE foo < $2', [3, 4]);
 
-my $select-subselect2 = $abstract.select(<new name> => SQL::Abstract::Select.create(:source<other_table>, :where{ :bar{ '>' => 3 } } ), <bar baz>, { :foo('<' => 4) });
+my $select-subselect2 = $abstract.select('new.name' => { :source<other_table>, :where{ :bar{ '>' => 3 } } }, <bar baz>, { :foo('<' => 4) });
 is-deeply $select-subselect2, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new.name WHERE foo < $2', [3, 4]);
 
 
@@ -136,9 +139,12 @@ my $select-funcsource1 = $abstract.select({ :function{ :name<some_function> }, :
 is-deeply $select-funcsource1, result('SELECT * FROM (some_function()) AS ranking (bar, baz)', []);
 
 
-my $when1 = SQL::Abstract::Op::Case::When.new(:condition(value("no")), :value(value(42)));
-my $select-case1 = $abstract.select('my_table', SQL::Abstract::Op::Case.new(:left(identifier('bar')), :whens[$when1], :else(value(13))), { :1foo });
+my $case = \(:case(\(:ident<bar>), ('no' => 42), 13));
+my $select-case1 = $abstract.select('my_table', $case, { :1foo });
 is-deeply $select-case1, result('SELECT CASE bar WHEN $1 THEN $2 ELSE $3 END FROM my_table WHERE foo = $4', ['no', 42, 13, 1]);
+
+my $select-case2 = $abstract.select('my_table', *, { :foo(\(:op('case', ('no' => 42), 13))) });
+is-deeply $select-case2, result('SELECT * FROM my_table WHERE CASE foo WHEN $1 THEN $2 ELSE $3 END', ['no', 42, 13]);
 
 
 my $select-junction1 = $abstract.select('my_table', <bar baz>, { :foo(1|2|4) });
@@ -186,7 +192,7 @@ my $select-locking2 = $abstract.select('my_table', <bar baz>, { :1foo }, :lockin
 is-deeply $select-locking2, result('SELECT bar, baz FROM my_table WHERE foo = $1 FOR UPDATE OF foo', [1]);
 
 
-my $e = binary('<', value(1), logical('and', [ value(1), value(2)]));
+my $e = \(:op['<', 1, \(:and[1, 2])]);
 my $select-precedence1 = $abstract.select('my_table', <bar baz>, $e);
 is-deeply $select-precedence1, result('SELECT bar, baz FROM my_table WHERE $1 < ($2 AND $3)', [1, 1, 2]);
 
@@ -218,14 +224,13 @@ my $select-join4 = $abstract.select({ :left<my_table>, :right<other_table>, :cro
 is-deeply $select-join4, result('SELECT bar, baz FROM my_table CROSS JOIN other_table WHERE foo = $1', [1]);
 
 
-my $select-other = SQL::Abstract::Select.create(:source<other_table>);
-my $select-sub1-any = SQL::Abstract::Op::In::Query.new(:left(identifier('foo')), :query($select-other));
+my $select-sub1-any = \(:op['in', \(:ident<foo>), \(:select{ :source<other_table> }) ]);
 my $select-sub1 = $abstract.select('my_table', <bar baz>, $select-sub1-any);
 is-deeply $select-sub1, result('SELECT bar, baz FROM my_table WHERE foo IN (SELECT * FROM other_table)', []);
 
-my $select-sub2-any = SQL::Abstract::Op::Exists.new(:left(identifier('foo')), :query($select-other));
+my $select-sub2-any = \(:exists{ :source<other_table> });
 my $select-sub2 = $abstract.select('my_table', <bar baz>, $select-sub2-any);
-is-deeply $select-sub2, result('SELECT bar, baz FROM my_table WHERE foo EXISTS (SELECT * FROM other_table)', []);
+is-deeply $select-sub2, result('SELECT bar, baz FROM my_table WHERE EXISTS (SELECT * FROM other_table)', []);
 
 
 
@@ -262,7 +267,7 @@ is-deeply $insert10, result('INSERT INTO my_table (bar, baz) OVERRIDING SYSTEM V
 my $insert11 = $abstract.insert('my_table', List, [ [ 1, 42 ], ]);
 is-deeply $insert11, result('INSERT INTO my_table VALUES ($1, $2)', [1, 42]);
 
-my $insert12 = $abstract.insert('my_table', { bar => default, baz => 43 });
+my $insert12 = $abstract.insert('my_table', { bar => \(:default), baz => 43 });
 is-deeply $insert12, result('INSERT INTO my_table (bar, baz) VALUES (DEFAULT, $1)', [43]);
 
 
@@ -284,12 +289,12 @@ is-deeply $update5, result('UPDATE my_table SET bar = bar + $1, baz = $2 WHERE q
 my $update6 = $abstract.update('my_table', { bar => 1, baz => 42 }, { quz => 13 }, :from<other>);
 is-deeply $update6, result('UPDATE my_table SET bar = $1, baz = $2 FROM other WHERE quz = $3', [1, 42, 13]);
 
-my $update7-columns = identifiers(<bar baz>);
-my $update7-select = SQL::Abstract::Select.create(:source<other_table>, :where{ :bar{ '>' => 3 } });
+my $update7-columns = \(:row(\(:ident<bar>), \(:ident<baz>)));
+my $update7-select = \(:select{ :source<other_table>, :where{ :bar{ '>' => 3 } } });
 my $update7 = $abstract.update('my_table', :{ $update7-columns => $update7-select }, { quz => 13 });
 is-deeply $update7, result('UPDATE my_table SET (bar, baz) = (SELECT * FROM other_table WHERE bar > $1) WHERE quz = $2', [3, 13]);
 
-my $update8 = $abstract.update('my_table', :{ $update7-columns => SQL::Abstract::Row.COERCE([1, 2]) }, { quz => 13 });
+my $update8 = $abstract.update('my_table', :{ $update7-columns => \(:row(\(:1bind), \(:2bind))) }, { quz => 13 });
 is-deeply $update8, result('UPDATE my_table SET (bar, baz) = ($1, $2) WHERE quz = $3', [1, 2, 13]);
 
 my $update9 = $abstract.update('my_table', { bar => 1, baz => 42 }, :from<quz>);
@@ -306,7 +311,7 @@ is-deeply $delete2, result('DELETE FROM my_table WHERE foo < $1 RETURNING baz', 
 my $delete3 = $abstract.delete('my_table', { :foo('<' => 3) }, :using<baz>);
 is-deeply $delete3, result('DELETE FROM my_table USING baz WHERE foo < $1', [3]);
 
-my $delete4 = $abstract.delete('my_table', current('cursor_name'), :using<baz>);
+my $delete4 = $abstract.delete('my_table', \(:current<cursor_name>), :using<baz>);
 is-deeply $delete4, result('DELETE FROM my_table USING baz WHERE CURRENT OF cursor_name', []);
 
 my $delete5 = $abstract.delete('my_table', \'CURRENT OF cursor_name', :using<baz>);
@@ -344,13 +349,13 @@ is $placeholders1.bind(delegate('name', 'foo')), '$3';
 
 
 
-my $conditional1 = SQL::Abstract::Conditions.COERCE((:1id));
+my SQL::Abstract::Conditions() $conditional1 = :1id;
 isa-ok $conditional1.expression, SQL::Abstract::Op::Equals;
 is $conditional1.expression.left, identifier('id');
 cmp-ok $conditional1.expression.left, '===', identifier('id');
 is-deeply $conditional1.expression.right, value(1);
 
-my $conditional2 = SQL::Abstract::Conditions.COERCE((:other(1|2)));
+my SQL::Abstract::Conditions() $conditional2 = :other(1|2);
 isa-ok $conditional2.expression, SQL::Abstract::Op::In;
 is-deeply $conditional2.expression.left, identifier('other');
 is-deeply $conditional2.expression.elements[0], value(1);
