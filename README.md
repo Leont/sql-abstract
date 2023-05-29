@@ -134,7 +134,7 @@ delete
 ------
 
 ```raku
-method delete(Table:D(Any:D) $target, Conditions(Any) $where, Common(Any) :$common,
+method delete(Table(Any) $target, Conditions(Any) $where, Common(Any) :$common,
 Source(Any) :$using, Column::List(Any) :$returning)
 ```
 
