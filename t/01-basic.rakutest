@@ -214,7 +214,7 @@ is-deeply $select-union2, result('SELECT bar, baz FROM my_table WHERE foo = $1 U
 my $select-join1 = $abstract.select({ :left<my_table>, :right(:quz<other_table>), :using<qaz>}, <bar baz>, { :1foo });
 is-deeply $select-join1, result('SELECT bar, baz FROM my_table INNER JOIN other_table AS quz USING (qaz) WHERE foo = $1', [1]);
 
-my $select-join2 = $abstract.select({ :left<my_table>, :right<other_table>, :on{ 'my_table.baz' => <other_table baz_id>} }, <bar baz>, { :1foo});
+my $select-join2 = $abstract.select({ :left<my_table>, :right<other_table>, :on{ 'my_table.baz' => 'other_table.baz_id'} }, <bar baz>, { :1foo});
 is-deeply $select-join2, result('SELECT bar, baz FROM my_table INNER JOIN other_table ON my_table.baz = other_table.baz_id WHERE foo = $1', [1]);
 
 my $select-join3 = $abstract.select({ :left<my_table>, :right<other_table>, :natural, :type<left> }, <bar baz>, { :1foo});

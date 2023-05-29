@@ -153,20 +153,12 @@ SQL::Abstract uses various helper types that will generally coerce from basic da
 SQL::Abstract::Identifier
 -------------------------
 
-This represents an identifier (typically a table name or column name, or an alias for such). It can be created from either:
-
-  * Str
-
-    This will interpret a string (e.g. `"foo"` or `"foo.bar"`) as an identifier.
-
-  * List
-
-    This will interpret the elements of the list representing the components of the name. E.g. `<bar baz> ` is equivalent to `"bar.baz" `.
+This represents an identifier (typically a table name or column name, or an alias for such). It can be coerced from a string (e.g. `"foo"` or `"foo.bar"`).
 
 SQL::Abstract::Identifiers
 --------------------------
 
-This takes either a list of `Identifier()`, or a single `Identifier()`. Note that a single list will be interpreted will be interpreted as a list of string identifiers, if one wants to pass a single list-from identifier the list must be nested (e.g. `[ <table column>,]`).
+This takes either a list of `Identifier()`, or a single `Identifier()`.
 
 ```raku
 my SQL::Abstract::Identifiers() $identifiers = <name email website>;
@@ -474,7 +466,7 @@ The second kind takes a single named argument that may or may not contain a valu
 
     This represents the `NULL` keyword
 
-  * Cool :$ident
+  * Str :$ident
 
     This represents an identifier (typically a column or table name)
 

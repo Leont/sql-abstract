@@ -104,17 +104,16 @@ multi expand-capture(:literal($) ($payload, *@arguments), *%args) {
 class Identifier does Term {
 	has Str @.parts;
 
-	proto method new(|) { * }
-	multi method new(@parts) {
+	method new(Cool $name) {
+		my @parts = $name.split('.');
 		self.bless(:@parts);
 	}
-	multi method new(Cool $name) {
-		my @parts = $name.split('.');
+	multi method new-from-list(@parts) {
 		self.bless(:@parts);
 	}
 
 	method concat(Identifier $other) {
-		self.new([|@!parts, |$other.parts]);
+		self.new-from-list([|@!parts, |$other.parts]);
 	}
 
 	sub quote(Str $part) {
@@ -128,8 +127,11 @@ class Identifier does Term {
 	}
 }
 
-multi expand-capture(Identifier(Cool) :$ident!) {
+multi expand-capture(Identifier(Str) :$ident!) {
 	$ident;
+}
+multi expand-capture(:@ident!) {
+	Identifier.new-from-list(@ident);
 }
 
 class Expression::Renamed does Expression {
@@ -190,10 +192,7 @@ class Column::List does Value::List {
 	multi to-column(Expression $column) {
 		$column;
 	}
-	multi to-column(Identifier(Str) $column) is default {
-		$column;
-	}
-	multi to-column(Identifier(List) $column) {
+	multi to-column(Identifier(Str) $column) {
 		$column;
 	}
 	multi to-column(Pair $ (:$key, Pair :$value)) {
@@ -1363,6 +1362,9 @@ role Source {
 		Table::Simple.new(:$name);
 	}
 
+	multi method COERCE(Pair (Identifier(Any) :$key, Identifier(Str) :$value)) {
+		Table::Renamed.new(:name($value), :alias($key));
+	}
 	multi method COERCE(Pair (Identifier(Any) :$key, Query :$value)) {
 		Source::Query.new(:query($value), :alias($key));
 	}
@@ -1377,14 +1379,11 @@ role Source {
 		my Function(Map) $function = { :$name, |%args };
 		Source::Function.new(:$function, :alias($key));
 	}
-	multi method COERCE(Pair (Identifier(Any) :$key, Identifier(Any) :$value)) {
-		Table::Renamed.new(:name($value), :alias($key));
-	}
 	multi method COERCE(Pair (Identifier(Any) :$key, Capture :$value)) {
 		self.COERCE(($key => expand-capture(|$value)));
 	}
 	
-	multi method COERCE(Map (Identifier(Any) :table($name), Identifier(Cool) :$alias, Identifiers(Cool) :$columns, Bool :$only)) {
+	multi method COERCE(Map (Identifier(Any) :table($name), Identifier(Any) :$alias, Identifiers(Cool) :$columns, Bool :$only)) {
 		Table::Renamed.new(:$name, :$alias, :$columns, :$only);
 	}
 	multi method COERCE(Map (Identifier(Any) :table($name)!, Bool :$only)) {
@@ -2073,8 +2072,12 @@ multi table(Identifier(Any) $name) {
 	Table::Simple.new(:$name);
 }
 
-sub identifier(Identifier(Cool) $ident) is export(:functions) {
+proto identifier(|) is export(:functions) {*}
+multi identifier(Identifier(Str) $ident) {
 	$ident;
+}
+multi identifier(@ident) {
+	Identifier.new-from-list(@ident);
 }
 
 sub identifiers(Identifiers(Any) $idents) is export(:functions) {
@@ -2295,23 +2298,11 @@ SQL::Abstract uses various helper types that will generally coerce from basic da
 
 =head2 SQL::Abstract::Identifier
 
-This represents an identifier (typically a table name or column name, or an alias for such). It can be created from either:
-
-=begin item1
-Str
-
-This will interpret a string (e.g. C<"foo"> or C<"foo.bar">) as an identifier.
-=end item1
-
-=begin item1
-List
-
-This will interpret the elements of the list representing the components of the name. E.g. C<< <bar baz> >> is equivalent to C< "bar.baz" >.
-=end item1
+This represents an identifier (typically a table name or column name, or an alias for such). It can be coerced from a string (e.g. C<"foo"> or C<"foo.bar">).
 
 =head2 SQL::Abstract::Identifiers
 
-This takes either a list of C<Identifier()>, or a single C<Identifier()>. Note that a single list will be interpreted will be interpreted as a list of string identifiers, if one wants to pass a single list-from identifier the list must be nested (e.g. C<[ <table column>,]>).
+This takes either a list of C<Identifier()>, or a single C<Identifier()>.
 
 =begin code :lang<raku>
 
@@ -2630,7 +2621,7 @@ This represents the C<NULL> keyword
 =end item1
 
 =begin item1
-Cool :$ident
+Str :$ident
 
 This represents an identifier (typically a column or table name)
 =end item1
