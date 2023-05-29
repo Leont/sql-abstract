@@ -1163,11 +1163,12 @@ role Source {
 		Table::Simple.new(:$name);
 	}
 
-	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Identifier(Cool) :$value)) {
-		Table::Renamed.new(:name($value), :alias($key));
-	}
 	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Query:D :$value)) {
 		Source::Query.new(:query($value), :alias($key));
+	}
+	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Map :$value (:$source!, *%args))) {
+		my $query = Select.create(|$value);
+		Source::Query.new(:query($query), :alias($key));
 	}
 	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Function:D :$value)) {
 		Source::Function.new(:function($value), :alias($key));
@@ -1175,6 +1176,9 @@ role Source {
 	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Map:D :$value ( :function($name)!, *%args ))) {
 		my Function(Map) $function = { :$name, |%args };
 		Source::Function.new(:$function, :alias($key));
+	}
+	multi method COERCE(Pair (Identifier:D(Cool:D) :$key, Identifier(Cool) :$value)) {
+		Table::Renamed.new(:name($value), :alias($key));
 	}
 	
 	multi method COERCE(Map (Identifier:D(Cool:D) :table($name), Identifier:D(Cool:D) :$alias, Identifiers(Cool) :$columns, Bool :$only)) {
