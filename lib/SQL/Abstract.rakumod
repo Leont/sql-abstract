@@ -679,9 +679,6 @@ class Conditions does Conditional {
 		expand-pair($left, $key, $value);
 	}
 
-	multi expand-partial(Expression $left, %hash) {
-		%hash.sort(*.key).map: { expand-partial($left, $^pair) };
-	}
 	multi expand-partial(Expression $left, Range $range) {
 		my $min = expand-expression($range.min);
 		my $max = expand-expression($range.max);
@@ -2442,10 +2439,6 @@ The logical operators take a list or arguments, that are all expanded like pair 
 =head3 Range
 
 This will check if a value is in a certain range. E.g. C<:left(1..42)> will render like C<left BETWEEN 1 AND 42>.
-
-=head3 Map
-
-This will be interpreted as a conjunction of the hash pairs. E.g. C<< :left{ '>' => 3, '<' => 42 } >> will render like C<< left > 3 AND left < 42 >>.
 
 =head3 Junction
 

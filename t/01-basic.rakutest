@@ -32,7 +32,7 @@ is-deeply $select-simple5, result('SELECT bar, baz FROM my_table WHERE foo IS NU
 my $select-simple6 = $abstract.select('my_table', <bar baz>, { :foo('<' => 3) });
 is-deeply $select-simple6, result('SELECT bar, baz FROM my_table WHERE foo < $1', [3]);
 
-my $select-simple7 = $abstract.select('my_table', <bar baz>, { :foo{ '<' => 3, '>' => 0 } });
+ my $select-simple7 = $abstract.select('my_table', <bar baz>, { :foo(\(:and('<' => 3, '>' => 0))) });
 is-deeply $select-simple7, result('SELECT bar, baz FROM my_table WHERE foo < $1 AND foo > $2', [3, 0]);
 
 my $select-simple8 = $abstract.select('my_table', <bar baz>, { :foo('<' => \'NOW()') });
@@ -79,10 +79,10 @@ my $select-rename2 = $abstract.select((:my_table<quz>), <bar baz>, { :foo(Any) }
 is-deeply $select-rename2, result('SELECT bar, baz FROM quz AS my_table WHERE foo IS NULL', []);
 
 
-my $select-subselect1 = $abstract.select({ :query{ :source<other_table>, :where{ :bar{ '>' => 3 } } }, :alias<new_name> }, <bar baz>, { :foo('<' => 4) });
+my $select-subselect1 = $abstract.select({ :query{ :source<other_table>, :where{ :bar('>' => 3) } }, :alias<new_name> }, <bar baz>, { :foo('<' => 4) });
 is-deeply $select-subselect1, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new_name WHERE foo < $2', [3, 4]);
 
-my $select-subselect2 = $abstract.select('new.name' => { :source<other_table>, :where{ :bar{ '>' => 3 } } }, <bar baz>, { :foo('<' => 4) });
+my $select-subselect2 = $abstract.select('new.name' => { :source<other_table>, :where{ :bar('>' => 3) } }, <bar baz>, { :foo('<' => 4) });
 is-deeply $select-subselect2, result('SELECT bar, baz FROM (SELECT * FROM other_table WHERE bar > $1) AS new.name WHERE foo < $2', [3, 4]);
 
 
@@ -290,7 +290,7 @@ my $update6 = $abstract.update('my_table', { bar => 1, baz => 42 }, { quz => 13 
 is-deeply $update6, result('UPDATE my_table SET bar = $1, baz = $2 FROM other WHERE quz = $3', [1, 42, 13]);
 
 my $update7-columns = \(:row(\(:ident<bar>), \(:ident<baz>)));
-my $update7-select = \(:select{ :source<other_table>, :where{ :bar{ '>' => 3 } } });
+my $update7-select = \(:select{ :source<other_table>, :where{ :bar('>' => 3) } });
 my $update7 = $abstract.update('my_table', :{ $update7-columns => $update7-select }, { quz => 13 });
 is-deeply $update7, result('UPDATE my_table SET (bar, baz) = (SELECT * FROM other_table WHERE bar > $1) WHERE quz = $2', [3, 13]);
 

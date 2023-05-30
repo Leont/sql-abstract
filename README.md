@@ -306,10 +306,6 @@ A few operators are not binary operators as such.
 
 This will check if a value is in a certain range. E.g. `:left(1..42)` will render like `left BETWEEN 1 AND 42`.
 
-### Map
-
-This will be interpreted as a conjunction of the hash pairs. E.g. `:left{ '>' => 3, '<' => 42 } ` will render like `left > 3 AND left < 42 `.
-
 ### Junction
 
 This will check against the values in the function. E.g. `:left(1|2|4)` will render like `left IN (1, 2, 4)`.
