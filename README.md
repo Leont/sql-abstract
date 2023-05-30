@@ -296,6 +296,12 @@ This will use the key as operator to compare left against another value or expre
 
   * `>> `
 
+A few operators are not binary operators as such.
+
+  * `null`
+
+    will do `IS NULL`, or `IS NOT NULL` if its argument is false(`:!null`).
+
 ### Range
 
 This will check if a value is in a certain range. E.g. `:left(1..42)` will render like `left BETWEEN 1 AND 42`.

@@ -644,10 +644,7 @@ class Conditions does Conditional {
 		Op::IsNull.new(:$left);
 	}
 
-	multi expand-pair(Expression $left, 'isnull', Bool $positive) {
-		Op::IsNull.new(:$left, :negated(!$positive));
-	}
-	multi expand-pair(Expression $left, 'isnotnull', Bool $positive) {
+	multi expand-pair(Expression $left, 'null', Bool $positive) {
 		Op::IsNull.new(:$left, :negated(!$positive));
 	}
 	multi expand-pair(Expression $left, Str $key, Any:D $value) {
@@ -2409,6 +2406,14 @@ This will use the key as operator to compare left against another value or expre
 =item C<|>
 =item C<<< << >>>
 =item C<<< >> >>>
+
+A few operators are not binary operators as such.
+
+=begin item1
+C<null>
+
+will do C<IS NULL>, or C<IS NOT NULL> if its argument is false(C<:!null>).
+=end item1
 
 =head3 Range
 

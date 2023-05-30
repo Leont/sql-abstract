@@ -26,7 +26,7 @@ is-deeply $select-simple3, result('SELECT bar, baz FROM my_table WHERE foo = $1'
 my $select-simple4 = $abstract.select('my_table', <bar baz>, { :foo(Any) });
 is-deeply $select-simple4, result('SELECT bar, baz FROM my_table WHERE foo IS NULL', []);
 
-my $select-simple5 = $abstract.select('my_table', <bar baz>, { :foo(:isnull) });
+my $select-simple5 = $abstract.select('my_table', <bar baz>, { :foo(:null) });
 is-deeply $select-simple5, result('SELECT bar, baz FROM my_table WHERE foo IS NULL', []);
 
 my $select-simple6 = $abstract.select('my_table', <bar baz>, { :foo('<' => 3) });
