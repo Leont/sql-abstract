@@ -306,6 +306,10 @@ A few operators are not binary operators as such.
 
     This takes a list of values that the column will be compared to. E.g. `:in(1, 2, 3)`.
 
+  * `and`/`or`
+
+    The logical operators take a list or arguments, that are all expanded like pair values. So `:foo(:and('>' => 3, '<' => 42)) ` renders as `foo > 3 AND foo < 42 `
+
 ### Range
 
 This will check if a value is in a certain range. E.g. `:left(1..42)` will render like `left BETWEEN 1 AND 42`.

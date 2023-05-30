@@ -628,6 +628,14 @@ class Conditions does Conditional {
 	multi expand-partial(Expression $left, Capture:D $capture (Bool :$null)) {
 		Op::IsNull.new(:$left, :negated(!$null));
 	}
+	multi expand-partial(Expression $left, Capture:D (:@and) ) {
+		my @elements = @and.map: { expand-partial($left, $^item) };
+		Op::And.pack(@elements);
+	}
+	multi expand-partial(Expression $left, Capture:D (:@or) ) {
+		my @elements = @or.map: { expand-partial($left, $^item) };
+		Op::Or.pack(@elements);
+	}
 	multi expand-partial(Expression $left, Capture:D $capture) {
 		Op::Equals.new(:$left, :right(expand-capture(|$capture)));
 	}
@@ -654,6 +662,14 @@ class Conditions does Conditional {
 	multi expand-pair(Expression $left, 'not-in', @items) {
 		my @elements = @items.map(&expand-expression);
 		Op::In::List(:$left, :@elements, :negated);
+	}
+	multi expand-pair(Expression $left, 'and', @and) {
+		my @elements = @and.map: { expand-partial($left, $^item) };
+		Op::And.pack(@elements);
+	}
+	multi expand-pair(Expression $left, 'or', @or) {
+		my @elements = @or.map: { expand-partial($left, $^item) };
+		Op::Or.pack(@elements);
 	}
 	multi expand-pair(Expression $left, Str $key, Any:D $value) {
 		my $right = expand-expression($value);
@@ -2427,6 +2443,12 @@ will do C<IS NULL>, or C<IS NOT NULL> if its argument is false(C<:!null>).
 C<in>/C<not-in>
 
 This takes a list of values that the column will be compared to. E.g. C<:in(1, 2, 3)>.
+=end item1
+
+=begin item1
+C<and>/C<or>
+
+The logical operators take a list or arguments, that are all expanded like pair values. So C<< :foo(:and('>' => 3, '<' => 42)) >> renders as C<< foo > 3 AND foo < 42 >>
 =end item1
 
 =head3 Range
