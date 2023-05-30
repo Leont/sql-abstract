@@ -647,6 +647,14 @@ class Conditions does Conditional {
 	multi expand-pair(Expression $left, 'null', Bool $positive) {
 		Op::IsNull.new(:$left, :negated(!$positive));
 	}
+	multi expand-pair(Expression $left, 'in', @items) {
+		my @elements = @items.map(&expand-expression);
+		Op::In::List(:$left, :@elements);
+	}
+	multi expand-pair(Expression $left, 'not-in', @items) {
+		my @elements = @items.map(&expand-expression);
+		Op::In::List(:$left, :@elements, :negated);
+	}
 	multi expand-pair(Expression $left, Str $key, Any:D $value) {
 		my $right = expand-expression($value);
 		my $class = %binary-op-for{$key}:exists ?? %binary-op-for{$key} !! Op::Comperative[$key];
@@ -2413,6 +2421,12 @@ A few operators are not binary operators as such.
 C<null>
 
 will do C<IS NULL>, or C<IS NOT NULL> if its argument is false(C<:!null>).
+=end item1
+
+=begin item1
+C<in>/C<not-in>
+
+This takes a list of values that the column will be compared to. E.g. C<:in(1, 2, 3)>.
 =end item1
 
 =head3 Range

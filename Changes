@@ -3,6 +3,7 @@ Revision history for SQL-Abstract
 {{$NEXT}}
     - Add Capture expressions
     - Rename :isnull to :null
+    - Add :in pair handling to Conditions
 
 0.0.4  2023-05-25T22:13:45+02:00
     - Allow locking clause to specify multiple tables

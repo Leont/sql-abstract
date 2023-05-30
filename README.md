@@ -302,6 +302,10 @@ A few operators are not binary operators as such.
 
     will do `IS NULL`, or `IS NOT NULL` if its argument is false(`:!null`).
 
+  * `in`/`not-in`
+
+    This takes a list of values that the column will be compared to. E.g. `:in(1, 2, 3)`.
+
 ### Range
 
 This will check if a value is in a certain range. E.g. `:left(1..42)` will render like `left BETWEEN 1 AND 42`.
