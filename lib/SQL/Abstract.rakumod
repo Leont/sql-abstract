@@ -872,6 +872,9 @@ class Function does Expression {
 	multi method COERCE(Map (Str :$function!, Column::List(Any) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
 		Function.new(:$function, :$arguments, :$filter, :$quantifier, :$order-by);
 	}
+	multi method COERCE(Pair (Str :$key, Column::List(Any) :$value)) {
+		Function.new(:function($key), :arguments($value));
+	}
 
 	method precedence() {
 		$!filter ?? Precedence::Between !! Precedence::Termlike;
@@ -1164,12 +1167,12 @@ class GroupBy {
 	multi to-grouping(Column::List(List) $column) {
 		$column;
 	}
-	multi to-grouping(Pair $pair) {
-		Function.COERCE({ :function($pair.key), :arguments($pair.value) });
+	multi to-grouping(Function(Pair) $function) {
+		$function;
 	}
 	multi to-grouping(Pair $pair (:$key where $key.lc eq 'grouping sets', :$value)) {
 		my @values = $value.map(&to-grouping);
-		Function.COERCE({ :function($key), :arguments(@values) });
+		Function.COERCE(( $key => @values ));
 	}
 
 	multi method COERCE(Any $grouping) {
@@ -1369,7 +1372,10 @@ role Source {
 	multi method COERCE(Pair (Identifier(Any) :$key, Select(Map) :$value)) {
 		Source::Query.new(:query($value), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier(Any) :$key, Function(FunctionMap) :$value)) {
+	multi method COERCE(Pair (Identifier(Any) :$key, Function:D(FunctionMap) :$value)) {
+		Source::Function.new(:function($value), :alias($key));
+	}
+	multi method COERCE(Pair (Identifier(Any) :$key, Function(Pair) :$value)) {
 		Source::Function.new(:function($value), :alias($key));
 	}
 	multi method COERCE(Pair (Identifier(Any) :$key, Capture :$value)) {
