@@ -1,6 +1,8 @@
 Revision history for SQL-Abstract
 
 {{$NEXT}}
+
+0.0.5  2023-05-31T16:48:16+02:00
     - Add Capture expressions
     - Rename :isnull to :null
     - Add :in pair handling to Conditions
