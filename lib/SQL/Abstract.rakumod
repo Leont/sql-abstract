@@ -1359,22 +1359,18 @@ role Source {
 		Table::Simple.new(:$name);
 	}
 
+	my subset FunctionMap of Map where .EXISTS-KEY('function');
 	multi method COERCE(Pair (Identifier(Any) :$key, Identifier(Str) :$value)) {
 		Table::Renamed.new(:name($value), :alias($key));
 	}
 	multi method COERCE(Pair (Identifier(Any) :$key, Query :$value)) {
 		Source::Query.new(:query($value), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier(Any) :$key, Map :$value (:$source!, *%args))) {
-		my $query = Select.create(|$value);
-		Source::Query.new(:query($query), :alias($key));
+	multi method COERCE(Pair (Identifier(Any) :$key, Select(Map) :$value)) {
+		Source::Query.new(:query($value), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier(Any) :$key, Function :$value)) {
+	multi method COERCE(Pair (Identifier(Any) :$key, Function(FunctionMap) :$value)) {
 		Source::Function.new(:function($value), :alias($key));
-	}
-	multi method COERCE(Pair (Identifier(Any) :$key, Map :$value ( :function($)!, *%args ))) {
-		my Function(Map) $function = $value;
-		Source::Function.new(:$function, :alias($key));
 	}
 	multi method COERCE(Pair (Identifier(Any) :$key, Capture :$value)) {
 		self.COERCE(($key => expand-capture(|$value)));
@@ -2333,6 +2329,12 @@ This will rename the table in the value to the name in the key.
 Pair (Str => Select(Map))
 
 This will use the result of a subquery as if it's a table.
+=end item1
+
+=begin item1
+Pair (Str => Function(Map))
+
+This will use the function as a subquery.
 =end item1
 
 =begin item1

@@ -185,6 +185,10 @@ A source is source of data, usually a table or a join. If not passed as a `Sourc
 
     This will use the result of a subquery as if it's a table.
 
+  * Pair (Str => Function(Map))
+
+    This will use the function as a subquery.
+
   * Map
 
     This will join two `Source`s, named `left` and `right`, it requires one of the following entries to join them on:
