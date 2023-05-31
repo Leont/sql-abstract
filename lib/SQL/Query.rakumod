@@ -7,8 +7,14 @@ class Delegate {
 	has Any $.default is default(Nil);
 	has Any:U $.type;
 
-	method has-default() {
-		$!default !=== Nil;
+	method resolve(%replacements) {
+		if %replacements{$!identifier}:exists {
+			%replacements{$!identifier};
+		} elsif $!default !=== Nil {
+			$!default;
+		} else {
+			die "No value given for delegate value '$!identifier'"
+		}
 	}
 }
 
@@ -23,21 +29,8 @@ method type-hints() {
 	@!arguments.map: { $^value ~~ Delegate ?? $value.type !! $value.WHAT };
 }
 
-multi resolve-value(Any $value, %replacements) {
-	$value;
-}
-multi resolve-value(Delegate $delegate, %replacements) {
-	if %replacements{$delegate.identifier}:exists {
-		%replacements{$delegate.identifier};
-	} elsif $delegate.has-default {
-		$delegate.default;
-	} else {
-		die "No value given for delegate value '$delegate.identifier()'"
-	}
-}
-
 method resolve(%replacements?) {
-	@!arguments.map: { resolve-value($^element, %replacements) };
+	@!arguments.map: { $^value ~~ Delegate ?? $^value.resolve(%replacements) !! $^value };
 }
 
 method identifiers() {
