@@ -15,18 +15,9 @@ class Placeholders::DBI does Placeholders {
 }
 
 class Placeholders::Postgres does Placeholders {
-	has Str %!names;
-	multi method bind(Any $value --> Str) {
+	method bind(Any $value --> Str) {
 		@!values.push($value);
 		'$' ~ +@!values;
-	}
-	multi method bind(SQL::Query::Delegate $value --> Str) {
-		if not $value.has-default and %!names{$value.identifier} -> $placeholder {
-			$placeholder;
-		} else {
-			@!values.push($value);
-			%!names{$value.identifier} = '$' ~ +@!values;
-		}
 	}
 }
 

@@ -341,12 +341,6 @@ is-deeply $prepared4.type-hints, (Int, Int, Int);
 is-deeply $prepared4.resolve, (1, 2, 3);
 is-deeply $prepared4.resolve({ :4foo }), (1, 2, 4);
 
-my $placeholders1 = SQL::Placeholders::Postgres.new;
-is $placeholders1.bind(delegate('name')), '$1';
-is $placeholders1.bind(1), '$2';
-is $placeholders1.bind(delegate('name')), '$1';
-is $placeholders1.bind(delegate('name', 'foo')), '$3';
-
 
 
 my SQL::Abstract::Conditions() $conditional1 = :1id;
