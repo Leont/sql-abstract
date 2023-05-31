@@ -2214,6 +2214,13 @@ Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning)
 
 This will update C<$target> by assigning the columns and values from C<$set> if they match C<$where>, returning C<$returning>.
 
+=begin code :lang<raku>
+
+$abtract.update('artists', { :name('The Artist (Formerly Known as Prince)') }, { :name<Prince> });
+# UPDATE artists SET name = 'The Artist (Formerly Known as Prince)' WHERE name = 'Prince'
+
+=end code
+
 =head2 insert
 
 =head3 Map insertion
