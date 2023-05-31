@@ -206,13 +206,13 @@ class Column::List does Value::List {
 		Identifier.new('*');
 	}
 	multi to-column(Map $map (Str :$function!, :%over!, *%args)) {
-		Function.COERCE({ :name($function), |%args }).over(|%over);
+		Function.COERCE({ :$function, |%args }).over(|%over);
 	}
 	multi to-column(Map $map (Str :$function!, Str :$over!, *%args)) {
-		Function.COERCE({ :name($function), |%args }).over($over);
+		Function.COERCE({ :$function, |%args }).over($over);
 	}
-	multi to-column(Map $map (Str :$function!, *%args)) {
-		Function.COERCE({ :name($function), |%args });
+	multi to-column(Function(Map) $function) {
+		$function;
 	}
 	multi to-column(Capture $capture) {
 		expand-capture(|$capture);
@@ -863,14 +863,14 @@ package Window {
 class Source::Function { ... }
 
 class Function does Expression {
-	has Str:D $.name is required;
+	has Str:D $.function is required;
 	has Quantifier $.quantifier;
 	has Value::List:D $.arguments is required;
 	has OrderBy $.order-by;
 	has Conditions $.filter;
 
-	multi method COERCE(Map (Str :$name!, Column::List(Any) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
-		Function.new(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
+	multi method COERCE(Map (Str :$function!, Column::List(Any) :$arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by)) {
+		Function.new(:$function, :$arguments, :$filter, :$quantifier, :$order-by);
 	}
 
 	method precedence() {
@@ -1165,11 +1165,11 @@ class GroupBy {
 		$column;
 	}
 	multi to-grouping(Pair $pair) {
-		Function.COERCE({ :name($pair.key), :arguments($pair.value) });
+		Function.COERCE({ :function($pair.key), :arguments($pair.value) });
 	}
 	multi to-grouping(Pair $pair (:$key where $key.lc eq 'grouping sets', :$value)) {
 		my @values = $value.map(&to-grouping);
-		Function.COERCE({ :name($key), :arguments(@values) });
+		Function.COERCE({ :function($key), :arguments(@values) });
 	}
 
 	multi method COERCE(Any $grouping) {
@@ -1372,8 +1372,8 @@ role Source {
 	multi method COERCE(Pair (Identifier(Any) :$key, Function :$value)) {
 		Source::Function.new(:function($value), :alias($key));
 	}
-	multi method COERCE(Pair (Identifier(Any) :$key, Map :$value ( :function($name)!, *%args ))) {
-		my Function(Map) $function = { :$name, |%args };
+	multi method COERCE(Pair (Identifier(Any) :$key, Map :$value ( :function($)!, *%args ))) {
+		my Function(Map) $function = $value;
 		Source::Function.new(:$function, :alias($key));
 	}
 	multi method COERCE(Pair (Identifier(Any) :$key, Capture :$value)) {
@@ -1645,7 +1645,7 @@ class Renderer::SQL does Renderer {
 		@expressions.append: self.render-column-expressions($placeholders, $function.arguments);
 		@expressions.append: self.render-order-by($placeholders, $function.order-by);
 		my $expression = @expressions.join(' ');
-		my @result = "{ $function.name() }($expression)";
+		my @result = "{ $function.function() }($expression)";
 		@result.push: 'FILTER', parenthesize-list(self.render-conditions($placeholders, $function.filter, 'WHERE')) with $function.filter;
 		@result.join(' ');
 	}
@@ -2095,8 +2095,8 @@ sub not(Expression $expression) is export(:functions) {
 	Op::Not.new($expression)
 }
 
-sub function(Str $name, Column::List(Any) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) is export(:functions) {
-	Function.new(:$name, :$arguments, :$filter, :$quantifier, :$order-by);
+sub function(Str $function, Column::List(Any) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) is export(:functions) {
+	Function.new(:$function, :$arguments, :$filter, :$quantifier, :$order-by);
 }
 
 our sub value(Any $value) is export(:functions) {
