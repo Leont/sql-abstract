@@ -239,6 +239,28 @@ multi expand-capture(Column::List(Any) :$columns!) {
 	$columns;
 }
 
+class Row does Value::List {
+	has Expression @.elements is required;
+
+	multi method COERCE(@values) {
+		my Expression @elements = @values.map(&expand-expression);
+		self.new(:@elements);
+	}
+}
+
+multi expand-capture(Row(List) :$row!) {
+	$row;
+}
+
+class Rows {
+	has Row @.elements is required;
+
+	multi method COERCE(@input) {
+		my Row(Any) @elements = @input;
+		self.new(:@elements);
+	}
+}
+
 role Op::HasLeft does Expression {
 	has Expression:D $.left is required;
 }
@@ -478,10 +500,10 @@ role Op::In does Op::InLike does Op::HasLeft {
 }
 
 class Op::In::List does Op::In {
-	has Value::List:D $.values is required handles<elements>;
+	has Row:D $.values is required handles<elements>;
 
 	submethod BUILD(Expression :$!left, :@elements, Bool :$!negated = False) {
-		$!values = Column::List.COERCE(@elements);
+		$!values = Row.COERCE(@elements);
 	}
 
 	method negate() {
@@ -786,28 +808,6 @@ class OrderBy {
 	}
 	multi method COERCE(@list) {
 		my @elements = @list.map(&to-sorter);
-		self.new(:@elements);
-	}
-}
-
-class Row does Value::List {
-	has Expression @.elements is required;
-
-	multi method COERCE(@values) {
-		my Expression @elements = @values.map(&expand-expression);
-		self.new(:@elements);
-	}
-}
-
-multi expand-capture(Row(List) :$row!) {
-	$row;
-}
-
-class Rows {
-	has Row @.elements is required;
-
-	multi method COERCE(@input) {
-		my Row(Any) @elements = @input;
 		self.new(:@elements);
 	}
 }
