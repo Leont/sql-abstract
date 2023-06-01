@@ -1,6 +1,7 @@
 Revision history for SQL-Abstract
 
 {{$NEXT}}
+    - Give helper subs package scope
 
 0.0.5  2023-05-31T16:48:16+02:00
     - Add Capture expressions

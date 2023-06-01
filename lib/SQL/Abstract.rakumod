@@ -1999,7 +1999,7 @@ multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 
-sub select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) is export(:functions) {
+our sub select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) is export(:functions) {
 	Select.new(:$common, :$distinct, :$columns, :$source, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
 }
 
@@ -2007,7 +2007,7 @@ method select(|args) {
 	$!renderer.render(select(|args));
 }
 
-sub update(Table(Any) $target, Assigns(Any) $assigns, Conditions(Any) $where?, Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning) is export(:functions) {
+our sub update(Table(Any) $target, Assigns(Any) $assigns, Conditions(Any) $where?, Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning) is export(:functions) {
 	my @assignments = $assigns.assignments;
 	Update.new(:$common, :$target, :@assignments, :$where, :$from, :$returning);
 }
@@ -2034,7 +2034,7 @@ method insert(|args) {
 	$!renderer.render(insert(|args));
 }
 
-sub delete(Table(Any) $target, Conditions(Any) $where, Common(Any) :$common, Source(Any) :$using, Column::List(Any) :$returning) is export(:functions) {
+our sub delete(Table(Any) $target, Conditions(Any) $where, Common(Any) :$common, Source(Any) :$using, Column::List(Any) :$returning) is export(:functions) {
 	Delete.new(:$common, :$target, :$where, :$using, :$returning);
 }
 
@@ -2042,7 +2042,7 @@ method delete(|args) {
 	$!renderer.render(delete(|args));
 }
 
-sub values(Rows(List) $rows, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset) {
+our sub values(Rows(List) $rows, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset) {
 	Values.new(:$rows, :$order-by, :$limit, :$offset);
 }
 
@@ -2079,25 +2079,25 @@ multi identifier(@ident) {
 	Identifier.new-from-list(@ident);
 }
 
-sub identifiers(Identifiers(Any) $idents) is export(:functions) {
+our sub identifiers(Identifiers(Any) $idents) is export(:functions) {
 	$idents;
 }
 
-sub binary(Str $operator, Expression $left, Expression $right, *%args) is export(:functions) {
+our sub binary(Str $operator, Expression $left, Expression $right, *%args) is export(:functions) {
 	my $class = %binary-op-for{$operator.lc}:exists ?? %binary-op-for{$operator.lc} !! die "No such operator '$operator'";
 	$class.new(:$left, :$right, |%args);
 }
 
-sub logical(Str $operator, @elements) is export(:functions) {
+our sub logical(Str $operator, @elements) is export(:functions) {
 	my $class = $operator.lc eq 'and' ?? Op::And !! $operator.lc eq 'or' ?? Op::Or !! die "No such operator '$operator'";
 	$class.new(:@elements);
 }
 
-sub not(Expression $expression) is export(:functions) {
+our sub not(Expression $expression) is export(:functions) {
 	Op::Not.new($expression)
 }
 
-sub function(Str $function, Column::List(Any) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) is export(:functions) {
+our sub function(Str $function, Column::List(Any) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) is export(:functions) {
 	Function.new(:$function, :$arguments, :$filter, :$quantifier, :$order-by);
 }
 
@@ -2105,20 +2105,20 @@ our sub value(Any $value) is export(:functions) {
 	expand-expression($value);
 }
 
-sub null() is export(:functions) {
+our sub null() is export(:functions) {
 	Value::Null.new;
 }
-sub default() is export(:functions) {
+our sub default() is export(:functions) {
 	Value::Default.new;
 }
-sub true() is export(:functions) {
+our sub true() is export(:functions) {
 	Value::True.new;
 }
-sub false() is export(:functions) {
+our sub false() is export(:functions) {
 	Value::False.new;
 }
 
-sub current(Identifier(Cool) $cursor) is export(:functions) {
+our sub current(Identifier(Cool) $cursor) is export(:functions) {
 	Current.new(:$cursor);
 }
 
