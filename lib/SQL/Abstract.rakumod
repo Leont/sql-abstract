@@ -502,8 +502,8 @@ role Op::In does Op::InLike does Op::HasLeft {
 class Op::In::List does Op::In {
 	has Row:D $.values is required handles<elements>;
 
-	submethod BUILD(Expression :$!left, :@elements, Bool :$!negated = False) {
-		$!values = Row.COERCE(@elements);
+	method create(Expression :$left, Row(List) :$values, Bool :$negated = False) {
+		self.new(:$left, :$values, :$negated);
 	}
 
 	method negate() {
@@ -531,19 +531,17 @@ multi expand-capture(:@op ('in', $left-expr, Capture (Select(Map) :$select!))) {
 	my $left = expand-expression($left-expr);
 	Op::In::Query.new(:$left, :query($select));
 }
-multi expand-capture(:@op ('in', $left-expr, *@args)) {
+multi expand-capture(:@op ('in', $left-expr, *@values)) {
 	my $left = expand-expression($left-expr);
-	my @elements = @args.map: { expand-expression($^item) };
-	Op::In::List.new(:$left, :@elements);
+	Op::In::List.create(:$left, :@values);
 }
 multi expand-capture(:@op ('not-in', $left-expr, Capture (Select(Map) :$select!))) {
 	my $left = expand-expression($left-expr);
 	Op::In::Query.new(:$left, :query($select), :negated);
 }
-multi expand-capture(:@op ('not-in', $left-expr, *@args)) {
+multi expand-capture(:@op ('not-in', $left-expr, *@values)) {
 	my $left = expand-expression($left-expr);
-	my @elements = @args.map: { expand-expression($^item) };
-	Op::In::List.new(:$left, :@elements, :negated);
+	Op::In::List.create(:$left, :@values, :negated);
 }
 
 class Op::Exists does Op::Subquery {
@@ -676,13 +674,11 @@ class Conditions does Conditional {
 	multi expand-pair(Expression $left, 'null', Bool $positive) {
 		Op::IsNull.new(:$left, :negated(!$positive));
 	}
-	multi expand-pair(Expression $left, 'in', @items) {
-		my @elements = @items.map(&expand-expression);
-		Op::In::List(:$left, :@elements);
+	multi expand-pair(Expression $left, 'in', @values) {
+		Op::In::List.create(:$left, :@values);
 	}
-	multi expand-pair(Expression $left, 'not-in', @items) {
-		my @elements = @items.map(&expand-expression);
-		Op::In::List(:$left, :@elements, :negated);
+	multi expand-pair(Expression $left, 'not-in', @values) {
+		Op::In::List.create(:$left, :@values, :negated);
 	}
 	multi expand-pair(Expression $left, 'and', @and) {
 		my @elements = @and.map: { expand-partial($left, $^item) };
@@ -711,7 +707,7 @@ class Conditions does Conditional {
 		Op::Or.pack(@partials);
 	}
 	multi expand-junction(Expression $left, 'any', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
-		Op::In::List.new(:$left, :elements(@partials».right));
+		Op::In::List.create(:$left, :values(@partials».right));
 	}
 	multi expand-junction(Expression $left, 'all', @partials) {
 		Op::And.pack(@partials);
@@ -720,7 +716,7 @@ class Conditions does Conditional {
 		Op::Or.pack(@partials).negate;
 	}
 	multi expand-junction(Expression $left, 'none', @partials where @partials > 0 && all(@partials) ~~ Op::Equals && all(@partials).left === $left) {
-		Op::In::List.new(:$left, :elements(@partials».right), :negated);
+		Op::In::List.create(:$left, :values(@partials».right), :negated);
 	}
 	multi expand-junction(Expression $left, 'one', @partials) {
 		my @comparisons = @partials.map: { Op::Cast.new(:$^primary, :typename<INTEGER>) };
