@@ -2183,7 +2183,7 @@ It also takes an optional argument C<:$quoting>, if enabled table and column nam
 
 method select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
 Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows,
-Compound(Pair) :$compound, OrderBy(Any) :$order-by, Int :$limit, Int :$offset, Locking(Any) :$locking)
+Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit :$limit, Offset :$offset, Locking(Any) :$locking)
 
 =end code
 
@@ -2587,6 +2587,10 @@ my Windows::Clauses $clauses =
 #   foo as (PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES)
 
 =end code
+
+=head2 SQL::Abstract::Limit / SQL::Abstract::Offset
+
+These both take either an C<Int> or an C<Expression>.
 
 =head1 Capture expressions
 

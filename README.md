@@ -57,7 +57,7 @@ select
 ```raku
 method select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
 Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows,
-Compound(Pair) :$compound, OrderBy(Any) :$order-by, Int :$limit, Int :$offset, Locking(Any) :$locking)
+Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit :$limit, Offset :$offset, Locking(Any) :$locking)
 ```
 
 This will generate a `SELECT` query. It will select `$columns` from `$source`, filtering by $conditions.
@@ -436,6 +436,11 @@ my Windows::Clauses $clauses =
 #   over5 AS (ROWS 5 PRECEDING),
 #   foo as (PARTITION BY foo, bar RANGE BETWEEN CURRENT ROW AND 5 FOLLOWING EXCLUDE TIES)
 ```
+
+SQL::Abstract::Limit / SQL::Abstract::Offset
+--------------------------------------------
+
+These both take either an `Int` or an `Expression`.
 
 Capture expressions
 ===================
