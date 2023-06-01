@@ -185,6 +185,8 @@ multi expand-capture(Identifiers(Any) :$idents!) {
 
 class Function { ... }
 
+class Star does Constant['*'] {}
+
 class Column::List does Value::List {
 	has Expression:D @.elements is required;
 
@@ -203,7 +205,7 @@ class Column::List does Value::List {
 		Expression::Renamed.COERCE($key => to-column($value));
 	}
 	multi to-column(Whatever) {
-		Identifier.new('*');
+		Star.new;
 	}
 	multi to-column(Map $map (Str :$function!, :%over!, *%args)) {
 		Function.COERCE({ :$function, |%args }).over(|%over);
