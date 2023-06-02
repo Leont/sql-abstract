@@ -44,6 +44,12 @@ method has-delegate(--> Bool) {
 our sub delegate(Str:D $identifier, Any $default = Nil, Any:U :$type = $default.WHAT) is export(:delegate) {
 	Delegate.new(:$identifier, :$default, :$type);
 }
+our sub delegate-pair(Str:D $identifier, Any $default = Nil, Any:U :$type = $default.WHAT) is export(:delegate) {
+	$identifier => Delegate.new(:$identifier, :$default, :$type);
+}
+our sub delegate-pairs(*@identifiers) is export(:delegate) {
+	@identifiers.map(&delegate-pair);
+}
 
 =begin pod
 
@@ -100,12 +106,25 @@ This returns true if any argument is delegate.
 
 =head1 delegate values
 
-A delegate value can be using the C<delegate> function.
-
-=head2 delegate(Str:D $identifier, Any $default?, Any:U :$type --> SQL::Query::Delegate)
-
-This takes an identifier that is later used to map the value to its substitution. It optionally takes a default value in case no substitution is provided.
-
 This functionality is mainly useful when abstracting over prepared statements.
+A delegate value can be using three helper functions:
+
+=head2 delegate
+
+This takes an identifier that is later used to map the value to its substitution. It optionally takes a default value in case no substitution is provided and a type for type-hinting.
+
+=code delegate(Str $identifier, Any $default?, Any:U :$type --> SQL::Query::Delegate)
+
+=head2 delegate-pair
+
+=code delegate-pair(Str $identifier, Any $default?, Any:U :$type = $default.WHAT --> Pair)
+
+This is much like C<delegate>, but returns a pair with the identifier as key and the delegate as value.
+
+=head2 delegate-pairs
+
+=code delegate-pairs(*@identifiers)
+
+This returns a sequence of delegate pairs with the chosen identifiers.
 
 =end pod

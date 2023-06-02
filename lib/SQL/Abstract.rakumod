@@ -2121,7 +2121,9 @@ our sub current(Identifier(Cool) $cursor) is export(:functions) {
 }
 
 my package EXPORT::functions {
-	our &delegate = &SQL::Query::delegate;
+	our &delegate       = &SQL::Query::delegate;
+	our &delegate-pair  = &SQL::Query::delegate-pair;
+	our &delegate-pairs = &SQL::Query::delegate-pairs;
 }
 
 =begin pod

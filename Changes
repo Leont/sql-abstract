@@ -3,6 +3,7 @@ Revision history for SQL-Abstract
 {{$NEXT}}
     - Give helper subs package scope
     - Make whatever star a constant instead of an identifier
+    - Add delegate-pair and delegate-pairs functions
 
 0.0.5  2023-05-31T16:48:16+02:00
     - Add Capture expressions
