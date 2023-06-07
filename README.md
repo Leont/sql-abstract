@@ -82,6 +82,11 @@ Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning)
 
 This will update `$target` by assigning the columns and values from `$set` if they match `$where`, returning `$returning`.
 
+```raku
+$abtract.update('artists', { :name('The Artist (Formerly Known as Prince)') }, { :name<Prince> });
+# UPDATE artists SET name = 'The Artist (Formerly Known as Prince)' WHERE name = 'Prince'
+```
+
 insert
 ------
 
