@@ -2139,7 +2139,7 @@ SQL::Abstract - Generate SQL from Raku data structures
 use SQL::Abstract;
 
 my $abstract = SQL::Abstract.new(:placeholders<dbi>);
-my $query = $abstract.select('table', <foo bar>, :id(3));
+my $query = $abstract.select('table', <foo bar>, { :id(3) });
 my $result = $dbh.query($result.sql, $result.arguments);
 
 my $join = { :left<books>, :right<authors>, :using<author_id> };
