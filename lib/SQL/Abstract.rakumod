@@ -2091,8 +2091,8 @@ our sub logical(Str $operator, @elements) is export(:functions) {
 	$class.new(:@elements);
 }
 
-our sub not(Expression $expression) is export(:functions) {
-	Op::Not.new($expression)
+our sub not(Expression $value) is export(:functions) {
+	Op::Not.new(:$value)
 }
 
 our sub function(Str $function, Column::List(Any) $arguments = (), Conditions(Any) :$filter, Quantifier(Str) :$quantifier, OrderBy(Any) :$order-by) is export(:functions) {
