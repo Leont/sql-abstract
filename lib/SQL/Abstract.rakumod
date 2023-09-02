@@ -87,9 +87,9 @@ role Constant[Str $keyword] does Term {
 class Value::Default does Constant['DEFAULT'] {}
 multi expand-capture(Bool :$default!) { Value::Default.new }
 class Value::True    does Constant['TRUE']    {}
-multi expand-capture(Bool :$true!) { Value::True.new }
+multi expand-capture(Bool :$true!) { $true ?? Value::True.new !! Value::False.new }
 class Value::False   does Constant['FALSE']   {}
-multi expand-capture(Bool :$false!) { Value::False.new }
+multi expand-capture(Bool :$false!) { $false ?? Value::False.new !! Value::True.new }
 class Value::Null    does Constant['NULL']    {}
 multi expand-capture(Bool :$null!) { Value::Null.new }
 
@@ -650,6 +650,12 @@ class Conditions does Conditional {
 	}
 	multi expand-partial(Expression $left, Capture:D $capture (Bool :$null)) {
 		Op::IsNull.new(:$left, :negated(!$null));
+	}
+	multi expand-partial(Expression $left, Capture:D $capture (Bool :$true)) {
+		my $op = $true ?? $left !! Op::Not.new(:value($left));
+	}
+	multi expand-partial(Expression $left, Capture:D $capture (Bool :$false)) {
+		my $op = $false ?? Op::Not.new(:value($left)) !! $left;
 	}
 	multi expand-partial(Expression $left, Capture:D (:@and) ) {
 		my @elements = @and.map: { expand-partial($left, $^item) };

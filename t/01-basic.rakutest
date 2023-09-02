@@ -52,7 +52,7 @@ my $select-simple12 = $abstract.select('my_table', <bar baz>, $like);
 is-deeply $select-simple12, result('SELECT bar, baz FROM my_table WHERE foo LIKE $1 ESCAPE $2', ['foo%', '\\']);
 
 my $select-simple13 = $abstract.select('my_table', <bar baz>, { :foo(\(:false)) });
-is-deeply $select-simple13, result('SELECT bar, baz FROM my_table WHERE foo = FALSE', []);
+is-deeply $select-simple13, result('SELECT bar, baz FROM my_table WHERE NOT foo', []);
 
 my $select-simple14 = $abstract.select('my_table', <bar baz>, { :foo(\(:null)) });
 is-deeply $select-simple14, result('SELECT bar, baz FROM my_table WHERE foo IS NULL', []);
