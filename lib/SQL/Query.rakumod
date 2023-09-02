@@ -1,4 +1,4 @@
-use v6;
+use v6.d;
 
 unit class SQL::Query:ver<0.0.6>:auth<zef:leont>;
 

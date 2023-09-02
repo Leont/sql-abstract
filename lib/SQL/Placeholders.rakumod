@@ -1,3 +1,5 @@
+use v6.d;
+
 unit package SQL;
 
 use SQL::Query;
