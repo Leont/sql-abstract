@@ -1239,7 +1239,7 @@ multi expand-capture(Select(Map) :$select!) {
 
 class Update does Query::Common {
 	has Table:D      $.target is required;
-	has Op::Assign:D @.assignments;
+	has Op::Assign:D @.assignments is required;
 	has Source       $.from;
 	has Conditions   $.where;
 	has Column::List $.returning;
