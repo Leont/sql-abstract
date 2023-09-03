@@ -1139,6 +1139,18 @@ class Common {
 		my Rename(Pair) @tables = @pairs;
 		self.new(:@tables);
 	}
+
+	multi method merge(Common:U: Common $other) {
+		$other;
+	}
+	multi method merge(Common:U: Common:U $other) {
+		self;
+	}
+	multi method merge(Common:D: Common:D $other) {
+		my @tables = |@!tables, |$other.tables;
+		my $recursive = $!recursive || $other.recursive;
+		self.new(:@tables, :$recursive);
+	}
 }
 
 role Query::Common does Query {
