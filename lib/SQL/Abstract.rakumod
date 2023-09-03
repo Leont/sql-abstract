@@ -1519,6 +1519,20 @@ class Source::Function does Source::Nested {
 	has Bool       $.ordinal;
 }
 
+role Proxy does Expression {
+	method expression(--> Expression) { ... }
+
+	method precedence(--> Precedence) {
+		self.expression.precedence;
+	}
+	method negate(--> Expression) {
+		self.expression.negate;
+	}
+	method as(Identifier(Any) $alias) {
+		self.expression.as($alias);
+	}
+}
+
 role Renderer {
 	method render() { ... }
 }
@@ -1560,6 +1574,10 @@ class Renderer::SQL does Renderer {
 	proto method render-expression(Placeholders $placeholders, Expression $expression, Precedence $outer --> Str) {
 		my $result = {*};
 		parenthesize-if($result, $outer > $expression.precedence);
+	}
+	multi method render-expression(Placeholders $placeholders, Proxy $proxy, Precedence $precedence --> Str) {
+		my $expression = $proxy.expression;
+		self.render-expression($placeholders, $expression, $precedence);
 	}
 	multi method render-expression(Placeholders $placeholders, Literal $literal, Precedence --> Str) {
 		$literal.payload.subst(/ <!after '\\'> '?'/, { $placeholders.bind($literal.arguments.shift) }, :g);
