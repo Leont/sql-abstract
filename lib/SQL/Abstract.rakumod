@@ -895,7 +895,7 @@ class Function does Expression {
 		Window::Function.new(:function(self), :$window);
 	}
 
-	method as(Identifier(Any) $alias, Identifiers(Cool) $columns?, Bool :$lateral, Bool :$ordinal) {
+	method as-source(Identifier(Any) $alias, Identifiers(Cool) $columns?, Bool :$lateral, Bool :$ordinal) {
 		Source::Function.new(:function(self), :$alias, :$columns, :$lateral, :$ordinal);
 	}
 }
@@ -1084,7 +1084,7 @@ role Query does Expression {
 		self.create(|%arguments);
 	}
 
-	method as(Identifier:D(Any:D) $alias, Bool :$lateral) {
+	method as-source(Identifier:D(Any:D) $alias, Bool :$lateral) {
 		Source::Query.new(:query(self), :$alias, :$lateral);
 	}
 }
