@@ -991,6 +991,17 @@ package Window {
 		multi method COERCE(Window::Clause(Pair) $window) {
 			self.new(:windows[ $window ]);
 		}
+
+		multi method merge(Clauses:U: Clauses $other) {
+			$other;
+		}
+		multi method merge(Clauses:D: Clauses:U $other) {
+			self;
+		}
+		multi method merge(Clauses:D: Clauses:D $other) {
+			my @windows = |@!windows, |$other.windows;
+			self.new(:@windows);
+		}
 	}
 }
 
