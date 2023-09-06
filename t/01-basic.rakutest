@@ -203,6 +203,9 @@ is-deeply $select-cte1, result('WITH my_table AS (SELECT * FROM other_table) SEL
 my $select-cte2 = $abstract.select('my_table', <bar baz>, { :1foo }, :common[ my_table => { :source<other_table> } ]);
 is-deeply $select-cte2, result('WITH my_table AS (SELECT * FROM other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
 
+my $select-cte3 = $abstract.select('my_table', <bar baz>, { :1foo }, :common{ :alias<my_table>, :table<other_table>, :materialized });
+is-deeply $select-cte3, result('WITH my_table AS MATERIALIZED (SELECT * FROM other_table) SELECT bar, baz FROM my_table WHERE foo = $1', [1]);
+
 
 my $select-union1 = $abstract.select('my_table', <bar baz>, { :1foo }, :compound(union => { :source<other_table> }), :order-by<bar>);
 is-deeply $select-union1, result('SELECT bar, baz FROM my_table WHERE foo = $1 UNION SELECT * FROM other_table ORDER BY bar', [1]);

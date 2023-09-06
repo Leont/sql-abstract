@@ -1128,6 +1128,7 @@ class Common {
 	class Rename {
 		has Name:D $.alias is required;
 		has Query:D $.query is required;
+		has Bool $.materialized;
 
 		multi method COERCE(Pair $pair (Name(Any) :key($alias), Select(Map) :value($query))) {
 			self.new(:$alias, :$query);
@@ -1139,15 +1140,25 @@ class Common {
 		multi method COERCE(Pair $pair (Name(Any) :key($alias), Query :value($query))) {
 			self.new(:$alias, :$query);
 		}
+		multi method COERCE(Map (Name(Any) :$alias, Select(Map) :$query, Bool :$materialized)) {
+			self.new(:$alias, :$query, :$materialized);
+		}
+		multi method COERCE(Map (Name(Any) :$alias, Table(Str) :$table, Bool :$materialized)) {
+			my $query = Select.create(:source($table));
+			self.new(:$alias, :$query, :$materialized);
+		}
+		multi method COERCE(Map (Name(Any) :$alias, Query :$query, Bool :$materialized)) {
+			self.new(:$alias, :$query, :$materialized);
+		}
 	}
 	has Rename @.tables;
 	has Bool $.recursive;
 
-	multi method COERCE(Rename(Pair) $table) {
+	multi method COERCE(Rename(Any) $table) {
 		self.new(:tables[$table]);
 	}
 	multi method COERCE(@pairs) {
-		my Rename(Pair) @tables = @pairs;
+		my Rename(Any) @tables = @pairs;
 		self.new(:@tables);
 	}
 
@@ -1836,10 +1847,11 @@ class Renderer::SQL does Renderer {
 	}
 
 	method render-common-table(Placeholders $placeholders, Common::Rename $rename --> Str) {
-		my $alias      = self.render-identifier($rename.alias.name);
-		my @columns    = self.render-identifiers($rename.alias.columns);
-		my $expression = self.render-expression($placeholders, $rename.query, Precedence::Comma);
-		"$alias AS $expression";
+		my $alias        = self.render-identifier($rename.alias.name);
+		my @columns      = self.render-identifiers($rename.alias.columns);
+		my @materialized = $rename.materialized.defined ?? (($rename.materialized ?? Empty !! 'NOT'), 'MATERIALIZED') !! Empty;
+		my $expression   = self.render-expression($placeholders, $rename.query, Precedence::Comma);
+		($alias, |@columns, 'AS', |@materialized, $expression).join(' ');
 	}
 
 	multi method render-common-tables(Placeholders $placeholders, Common:D $common --> List) {
