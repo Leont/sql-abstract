@@ -1555,6 +1555,14 @@ role Proxy does Expression {
 	}
 }
 
+role Exception is ::Exception {
+	has Str:D $.message is required;
+
+	method new(Str:D $message) {
+		self.bless(:$message);
+	}
+}
+
 role Renderer {
 	method render() { ... }
 }
