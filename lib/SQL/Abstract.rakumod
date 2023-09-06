@@ -1567,15 +1567,16 @@ role Renderer {
 	method render() { ... }
 }
 
-class Renderer::SQL { ... }
+role Renderer::SQL { ... }
 
 role Expression::Custom does Expression {
 	method render-sql(Renderer::SQL $renderer) { ... }
 }
 
-class Renderer::SQL does Renderer {
-	has Placeholders $.placeholders is required;
+role Renderer::SQL does Renderer {
 	has Bool:D $.quoting = False;
+
+	method placeholders() { ... }
 
 	sub parenthesize-if(Str $input, Bool() $parenthese --> Str) {
 		$parenthese ?? "($input)" !! $input;
@@ -1970,7 +1971,7 @@ class Renderer::SQL does Renderer {
 	}
 
 	method render-overriding(Overriding $override) {
-		'OVERRIDING', $override.uc, 'VALUE';
+		...
 	}
 
 	method render-values(Placeholders $placeholders, Rows $rows) {
@@ -1988,30 +1989,8 @@ class Renderer::SQL does Renderer {
 		'DEFAULT VALUES';
 	}
 
-	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Columns $target) {
-		my $columns = self.render-identifiers($target.columns);
-		my @where = self.render-conditions($placeholders, $target.where);
-		$columns, |@where;
-	}
-	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Constraint $target) {
-		'ON CONSTRAINT', self.render-identifier($target.constraint);
-	}
-
-	multi method render-conflict(Placeholders $placeholders, Conflict::Nothing $conflict) {
-		my @target = $conflict.target ?? self.render-conflict-target($placeholders, $conflict.target) !! Empty;
-		'ON CONFLICT', |@target, 'DO NOTHING';
-	}
-	multi method render-conflict(Placeholders $placeholders, Conflict::Update $conflict) {
-		my @result = 'ON CONFLICT';
-		@result.push: self.render-conflict-target($placeholders, $conflict.target) with $conflict.target;
-		@result.push: 'DO UPDATE SET';
-		@result.push: self.render-expressions($placeholders, $conflict.assignments);
-		@result.push: self.render-conditions($placeholders, $conflict.where);
-		@result;
-	}
-
 	method render-conflicts(Placeholders $placeholders, Conflicts $conflicts) {
-		$conflicts.conflicts.flatmap: { self.render-conflict($placeholders, $^conflict) };
+		...
 	}
 
 	multi method render-expression(Placeholders $placeholders, Insert $insert, Precedence --> Str) {
@@ -2051,18 +2030,83 @@ class Renderer::SQL does Renderer {
 	}
 }
 
-has Renderer:D $.renderer is required handles<render>;
+class Exception::Input does Exception {
+}
+class Exception::Portability does Exception {
+}
 
-multi submethod BUILD(Renderer:D :$!renderer!) {}
 my %holder-for = (
 	dbi      => SQL::Placeholders::DBI,
 	postgres => SQL::Placeholders::Postgres,
 );
-multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, Str:D :placeholders($placeholder-str)!, *%arguments) {
-	my $placeholders = %holder-for{$placeholder-str}:exists ?? %holder-for{$placeholder-str} !! die "No such placeholder style $placeholder-str";
-	$!renderer = $renderer.new(:$placeholders, |%arguments);
+
+class Renderer::Postgres does Renderer::SQL {
+	has Placeholders $.placeholders is required where $_ !=== Placeholders;
+
+	multi method new(Str:D :placeholders($placeholder-str)!, *%arguments) {
+		die Exception::Input.new("No such placeholder style $placeholder-str") unless %holder-for{$placeholder-str}:exists;
+		my $placeholders = %holder-for{$placeholder-str};
+		self.bless(:$placeholders, |%arguments);
+	}
+
+	method render-overriding(Overriding $override) {
+		'OVERRIDING', $override.uc, 'VALUE';
+	}
+
+	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Columns $target) {
+		my $columns = self.render-identifiers($target.columns);
+		my @where = self.render-conditions($placeholders, $target.where);
+		$columns, |@where;
+	}
+	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Constraint $target) {
+		'ON CONSTRAINT', self.render-identifier($target.constraint);
+	}
+
+	multi method render-conflict(Placeholders $placeholders, Conflict::Nothing $conflict) {
+		my @target = $conflict.target ?? self.render-conflict-target($placeholders, $conflict.target) !! Empty;
+		'ON CONFLICT', |@target, 'DO NOTHING';
+	}
+	multi method render-conflict(Placeholders $placeholders, Conflict::Update $conflict) {
+		my @result = 'ON CONFLICT';
+		@result.push: self.render-conflict-target($placeholders, $conflict.target) with $conflict.target;
+		@result.push: 'DO UPDATE SET';
+		@result.push: self.render-expressions($placeholders, $conflict.assignments);
+		@result.push: self.render-conditions($placeholders, $conflict.where);
+		@result;
+	}
+
+	method render-conflicts(Placeholders $placeholders, Conflicts $conflicts) {
+		$conflicts.conflicts.flatmap: { self.render-conflict($placeholders, $^conflict) };
+	}
 }
-multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::SQL, *%arguments) {
+
+class Renderer::MySQL does Renderer::SQL {
+	method placeholders() { SQL::Placeholders::DBI }
+
+	method render-overriding(Overriding $override) {
+		Empty;
+	}
+
+	multi method render-conflict(Placeholders $placeholders, Conflict::Nothing $conflict) {
+		die Exception::Portability.new("MySQL can't do nothing on conflict");
+	}
+	multi method render-conflict(Placeholders $placeholders, Conflict::Update $conflict) {
+		die Exception::Portability.new('No conflict conditions allowed for MySQL') if $conflict.where;
+		my @result = 'ON DUPLICATE KEY UPDATE';
+		@result.push: self.render-expressions($placeholders, $conflict.assignments);
+		@result;
+	}
+
+	method render-conflicts(Placeholders $placeholders, Conflicts $conflicts) {
+		die Exception::Portability.new('Only one conflict clause allowed in MySQL') if $conflicts.conflicts > 1;
+		$conflicts.conflicts.flatmap: { self.render-conflict($placeholders, $^conflict) };
+	}
+}
+
+has Renderer:D $.renderer is required handles<render>;
+
+multi submethod BUILD(Renderer:D :$!renderer!) {}
+multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::Postgres, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 
@@ -2231,23 +2275,50 @@ It should be able to represent any C<SELECT>, C<UPDATE>, C<INSERT>, or C<DELETE>
 
 This is the main class of the module.
 
-=head3 new(:$placeholders!, Bool :$quoting)
+=head3 new(:$renderer, Bool :$quoting, *%renderer-args)
 
-This creates a new C<SQL::Abstract> object. It has one mandatory name argument, C<$placeholders>, which takes one of the following values:
+This creates a new C<SQL::Abstract> object.
+
+It supports at least two named arguments:
 
 =begin item1
+C<Bool :$quote>
+
+=end item1
+
+=begin item1
+C<:$renderer>
+
+This can either be a C<Renderer> type-object, or the name of such an object. Valid values include:
+
+=begin item2
+C<'postgres'>/C<SQL::Abstract::Renderer::Postgres>
+
+=end item2
+
+=begin item2
+C<'mysql'>/C<SQL::Abstract::Renderer::MySQL>
+
+=end item2
+
+
+The postgres renderer takes an additional argument C<:$placeholders>, which takes one of the following values:
+
+=begin item2
 C<'dbi'>/C<SQL::Abstract::Placeholders::DBI>
 
 This will use DBI style C<(?, ?)> placeholders
-=end item1
+=end item2
 
-=begin item1
+=begin item2
 C<'postgres'>/C<SQL::Abstract::Placeholders::Postgres>
 
 This will use Postgres style C<($1, $2)> placeholders.
-=end item1
+=end item2
 
 It also takes an optional argument C<:$quoting>, if enabled table and column names will always be quoted.
+
+=end item1
 
 =head2 select
 
