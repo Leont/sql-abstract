@@ -289,8 +289,8 @@ is-deeply $update4, result('UPDATE my_table SET bar = bar + 1, baz = $1 WHERE qu
 my $update5 = $abstract.update('my_table', { bar => \('bar + ?', 1), baz => 42 }, { quz => 13 });
 is-deeply $update5, result('UPDATE my_table SET bar = bar + $1, baz = $2 WHERE quz = $3', [1, 42, 13]);
 
-my $update6 = $abstract.update('my_table', { bar => 1, baz => 42 }, { quz => 13 }, :from<other>);
-is-deeply $update6, result('UPDATE my_table SET bar = $1, baz = $2 FROM other WHERE quz = $3', [1, 42, 13]);
+my $update6 = $abstract.update('my_table', { bar => 1, baz => 42 }, { quz => 13 }, :from(other => :a<b>));
+is-deeply $update6, result('UPDATE my_table SET bar = $1, baz = $2 FROM other WHERE quz = $3 AND a = b', [1, 42, 13]);
 
 my $update7-columns = \(:row(\(:ident<bar>), \(:ident<baz>)));
 my $update7-select = \(:select{ :source<other_table>, :where{ :bar('>' => 3) } });

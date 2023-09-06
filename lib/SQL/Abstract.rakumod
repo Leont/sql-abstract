@@ -1259,14 +1259,28 @@ multi expand-capture(Select(Map) :$select!) {
 	$select;
 }
 
+class Join::Conditions { ... }
+
+class Update::From {
+	has Source:D $.source is required;
+	has Join::Conditions $.conditions;
+
+	multi method COERCE(Source(Str) $source) {
+		self.new(:$source);
+	}
+	multi method COERCE(Pair (Source(Any) :$key, Join::Conditions(Any) :$value)) {
+		self.new(:source($key), :conditions($value));
+	}
+}
+
 class Update does Query::Common {
 	has Table:D      $.target is required;
 	has Op::Assign:D @.assignments is required;
-	has Source       $.from;
+	has Update::From $.from;
 	has Conditions   $.where;
 	has Column::List $.returning;
 
-	method create(Table(Cool) :$target!, Assigns:D(Any:D) :$assigns!, Source(Any) :$from, Conditions(Any) :$where, Column::List(Any) :$returning) {
+	method create(Table(Cool) :$target!, Assigns:D(Any:D) :$assigns!, Update::From(Any) :$from, Conditions(Any) :$where, Column::List(Any) :$returning) {
 		my @assignments = $assigns.assignments;
 		Update.new(:$target, :@assignments, :$where, :$from, :$returning);
 	}
@@ -1378,17 +1392,16 @@ class Insert::Defaults does Insert {
 
 class Delete does Query::Common {
 	has Table:D      $.target is required;
-	has Source       $.using;
+	has Update::From $.using;
 	has Conditions   $.where;
 	has Column::List $.returning;
 
-	method create(Table(Cool) :$target!, Source(Any) :$using, Conditions(Any) :$where, Column::List(Any) :$returning) {
+	method create(Table(Cool) :$target!, Update::From(Any) :$using, Conditions(Any) :$where, Column::List(Any) :$returning) {
 		Delete.new(:$target, :$where, :$using :$returning);
 	}
 }
 
 class Join::On { ... }
-class Join::Conditions { ... }
 class Join::Using { ... }
 class Join::Natural { ... }
 class Join::Cross { ... }
@@ -1960,14 +1973,7 @@ role Renderer::SQL does Renderer {
 	}
 
 	multi method render-expression(Placeholders $placeholders, Update $update, Precedence --> Str) {
-		my @common       = self.render-common-tables($placeholders, $update.common);
-		my @target       = self.render-table($update.target);
-		my @set          = 'SET', self.render-expressions($placeholders, $update.assignments);
-		my @from         = self.render-from($placeholders, $update.from);
-		my @where        = self.render-conditions($placeholders, $update.where);
-		my @returning    = self.render-column-expressions($placeholders, $update.returning, 'RETURNING');
-
-		(@common, 'UPDATE', @target, @set, @from, @where, @returning).flat.join(' ');
+		...
 	}
 
 	method render-overriding(Overriding $override) {
@@ -2006,13 +2012,7 @@ role Renderer::SQL does Renderer {
 	}
 
 	multi method render-expression(Placeholders $placeholders, Delete $delete, Precedence) {
-		my @common    = self.render-common-tables($placeholders, $delete.common);
-		my @target    = self.render-table($delete.target);
-		my @using     = self.render-from($placeholders, $delete.using, 'USING');
-		my @where     = self.render-conditions($placeholders, $delete.where);
-		my @returning = self.render-column-expressions($placeholders, $delete.returning, 'RETURNING');
-
-		(@common, 'DELETE FROM', @target, @using, @where, @returning).flat.join(' ');
+		...
 	}
 
 	multi method render-expression(Placeholders $placeholders, Values $values, Precedence --> Str) {
@@ -2049,6 +2049,19 @@ class Renderer::Postgres does Renderer::SQL {
 		self.bless(:$placeholders, |%arguments);
 	}
 
+	multi method render-expression(Placeholders $placeholders, Update $update, Precedence --> Str) {
+		my @common       = self.render-common-tables($placeholders, $update.common);
+		my @target       = self.render-table($update.target);
+		my @set          = self.render-expressions($placeholders, $update.assignments);
+		my $from         = $update.from ?? $update.from.source !! Source;
+		my $where        = $update.from ?? $update.where.merge($update.from.conditions) !! $update.where;
+		my @from         = self.render-from($placeholders, $from);
+		my @where        = self.render-conditions($placeholders, $where);
+		my @returning    = self.render-column-expressions($placeholders, $update.returning, 'RETURNING');
+
+		(@common, 'UPDATE', @target, 'SET', @set, @from, @where, @returning).flat.join(' ');
+	}
+
 	method render-overriding(Overriding $override) {
 		'OVERRIDING', $override.uc, 'VALUE';
 	}
@@ -2078,10 +2091,33 @@ class Renderer::Postgres does Renderer::SQL {
 	method render-conflicts(Placeholders $placeholders, Conflicts $conflicts) {
 		$conflicts.conflicts.flatmap: { self.render-conflict($placeholders, $^conflict) };
 	}
+
+	multi method render-expression(Placeholders $placeholders, Delete $delete, Precedence) {
+		my @common    = self.render-common-tables($placeholders, $delete.common);
+		my @target    = self.render-table($delete.target);
+		my $using     = $delete.using ?? $delete.using.source !! Source;
+		my $where     = $delete.using ?? $delete.where.merge($delete.using.conditions) !! $delete.where;
+		my @using     = self.render-from($placeholders, $using, 'USING');
+		my @where     = self.render-conditions($placeholders, $where);
+		my @returning = self.render-column-expressions($placeholders, $delete.returning, 'RETURNING');
+
+		(@common, 'DELETE FROM', @target, @using, @where, @returning).flat.join(' ');
+	}
 }
 
 class Renderer::MySQL does Renderer::SQL {
 	method placeholders() { SQL::Placeholders::DBI }
+
+	multi method render-expression(Placeholders $placeholders, Update $update, Precedence --> Str) {
+		my @common       = self.render-common-tables($placeholders, $update.common);
+		my $target       = $update.from ?? $update.target.join($update.from.source, :on($update.from.conditions)) !! $update.target;
+		my @target       = self.render-source($target);
+		my @set          = self.render-expressions($placeholders, $update.assignments);
+		my @where        = self.render-conditions($placeholders, $update.where);
+		die Exception::Portability.new("MySQL doesn't support RETURNING clause on UPDATE") if $update.returning;
+
+		(@common, 'UPDATE', @target, 'SET', @set, @where).flat.join(' ');
+	}
 
 	method render-overriding(Overriding $override) {
 		Empty;
@@ -2101,6 +2137,16 @@ class Renderer::MySQL does Renderer::SQL {
 		die Exception::Portability.new('Only one conflict clause allowed in MySQL') if $conflicts.conflicts > 1;
 		$conflicts.conflicts.flatmap: { self.render-conflict($placeholders, $^conflict) };
 	}
+
+	multi method render-expression(Placeholders $placeholders, Delete $delete, Precedence) {
+		my @common    = self.render-common-tables($placeholders, $delete.common);
+		my $target    = $delete.using ?? $delete.target.join($delete.using.source, :on($delete.using.conditions)) !! $delete.target;
+		my @target    = self.render-source($placeholders, $target);
+		my @where     = self.render-conditions($placeholders, $delete.where);
+		my @returning = self.render-column-expressions($placeholders, $delete.returning, 'RETURNING');
+
+		(@common, 'DELETE FROM', @target, @where, @returning).flat.join(' ');
+	}
 }
 
 has Renderer:D $.renderer is required handles<render>;
@@ -2118,7 +2164,7 @@ method select(|args) {
 	$!renderer.render(select(|args));
 }
 
-our sub update(Table(Any) $target, Assigns(Any) $assigns, Conditions(Any) $where?, Common(Any) :$common, Source(Any) :$from, Column::List(Any) :$returning) is export(:functions) {
+our sub update(Table(Any) $target, Assigns(Any) $assigns, Conditions(Any) $where?, Common(Any) :$common, Update::From(Any) :$from, Column::List(Any) :$returning) is export(:functions) {
 	my @assignments = $assigns.assignments;
 	Update.new(:$common, :$target, :@assignments, :$where, :$from, :$returning);
 }
@@ -2145,7 +2191,7 @@ method insert(|args) {
 	$!renderer.render(insert(|args));
 }
 
-our sub delete(Table(Any) $target, Conditions(Any) $where, Common(Any) :$common, Source(Any) :$using, Column::List(Any) :$returning) is export(:functions) {
+our sub delete(Table(Any) $target, Conditions(Any) $where, Common(Any) :$common, Update::From(Any) :$using, Column::List(Any) :$returning) is export(:functions) {
 	Delete.new(:$common, :$target, :$where, :$using, :$returning);
 }
 
