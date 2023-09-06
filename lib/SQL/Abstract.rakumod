@@ -2143,7 +2143,8 @@ our sub identifiers(Identifiers(Any) $idents) is export(:functions) {
 }
 
 our sub binary(Str $operator, Expression $left, Expression $right, *%args) is export(:functions) {
-	my $class = %binary-op-for{$operator.lc}:exists ?? %binary-op-for{$operator.lc} !! die "No such operator '$operator'";
+	my $key = $operator.lc;
+	my $class = %binary-op-for{$key}:exists ?? %binary-op-for{$key} !! Op::Comperative[$key];
 	$class.new(:$left, :$right, |%args);
 }
 
