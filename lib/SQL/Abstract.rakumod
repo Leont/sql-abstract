@@ -2157,8 +2157,24 @@ class Renderer::MySQL does Renderer::SQL {
 
 has Renderer:D $.renderer is required handles<render>;
 
+my Renderer %renderer =(
+	postgres => Renderer::Postgres,
+	sqlite   => Renderer::SQLite,
+	mysql    => Renderer::MySQL,
+);
+
+my sub renderer-for(Str $name) {
+	my $result = %renderer{$name};
+	die Exception::Input.new("No such renderer $name") if $result === Renderer;
+	return $result;
+}
+
 multi submethod BUILD(Renderer:D :$!renderer!) {}
-multi submethod BUILD(Renderer::SQL:U :$renderer = Renderer::Postgres, *%arguments) {
+multi submethod BUILD(Renderer:U :$renderer = Renderer::Postgres, *%arguments) {
+	$!renderer = $renderer.new(|%arguments);
+}
+multi submethod BUILD(Str:D :renderer($renderer-name)!, *%arguments) {
+	my $renderer = renderer-for($renderer-name);
 	$!renderer = $renderer.new(|%arguments);
 }
 

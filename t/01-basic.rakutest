@@ -11,7 +11,7 @@ my $result1 = result('SELECT * FROM foo', [1, 2, 3]);
 is $result1.sql, 'SELECT * FROM foo';
 is +$result1.arguments, 3;
 
-my $abstract = SQL::Abstract.new(:placeholders<postgres>);
+my $abstract = SQL::Abstract.new(:renderer<postgres>, :placeholders<postgres>);
 
 my $select-simple1 = $abstract.select('my_table');
 
