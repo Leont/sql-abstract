@@ -2040,9 +2040,7 @@ my %holder-for = (
 	postgres => SQL::Placeholders::Postgres,
 );
 
-class Renderer::Postgres does Renderer::SQL {
-	has Placeholders $.placeholders is required where $_ !=== Placeholders;
-
+role Renderer::Sensible does Renderer::SQL {
 	multi method new(Str:D :placeholders($placeholder-str)!, *%arguments) {
 		die Exception::Input.new("No such placeholder style $placeholder-str") unless %holder-for{$placeholder-str}:exists;
 		my $placeholders = %holder-for{$placeholder-str};
@@ -2103,6 +2101,14 @@ class Renderer::Postgres does Renderer::SQL {
 
 		(@common, 'DELETE FROM', @target, @using, @where, @returning).flat.join(' ');
 	}
+}
+
+class Renderer::Postgres does Renderer::Sensible {
+	has Placeholders $.placeholders is required where $_ === any(Placeholders::DBI, Placeholders::Postgres);
+}
+
+class Renderer::SQLite does Renderer::Sensible {
+	has Placeholders $.placeholders where $_ === any(Placeholders::DBI, Placeholders::Postgres) = Placeholders::DBI;
 }
 
 class Renderer::MySQL does Renderer::SQL {
@@ -2339,6 +2345,11 @@ This can either be a C<Renderer> type-object, or the name of such an object. Val
 
 =begin item2
 C<'postgres'>/C<SQL::Abstract::Renderer::Postgres>
+
+=end item2
+
+=begin item2
+C<'sqlite'>/C<SQL::Abstract::Renderer::SQLite>
 
 =end item2
 
