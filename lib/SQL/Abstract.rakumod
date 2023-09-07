@@ -2170,7 +2170,7 @@ my sub renderer-for(Str $name) {
 }
 
 multi submethod BUILD(Renderer:D :$!renderer!) {}
-multi submethod BUILD(Renderer:U :$renderer = Renderer::Postgres, *%arguments) {
+multi submethod BUILD(Renderer:U :$renderer!, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 multi submethod BUILD(Str:D :renderer($renderer-name)!, *%arguments) {
@@ -2343,7 +2343,7 @@ It should be able to represent any C<SELECT>, C<UPDATE>, C<INSERT>, or C<DELETE>
 
 This is the main class of the module.
 
-=head3 new(:$renderer, Bool :$quoting, *%renderer-args)
+=head3 new(:$renderer!, Bool :$quoting, *%renderer-args)
 
 This creates a new C<SQL::Abstract> object.
 
