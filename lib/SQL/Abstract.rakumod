@@ -1133,8 +1133,8 @@ class Common {
 		multi method COERCE(Pair $pair (Name(Any) :key($alias), Select(Map) :value($query))) {
 			self.new(:$alias, :$query);
 		}
-		multi method COERCE(Pair $pair (Name(Any) :key($alias), Table(Str) :value($source))) {
-			my $query = Select.create(:$source);
+		multi method COERCE(Pair $pair (Name(Any) :key($alias), Table(Str) :value($from))) {
+			my $query = Select.create(:$from);
 			self.new(:$alias, :$query);
 		}
 		multi method COERCE(Pair $pair (Name(Any) :key($alias), Query :value($query))) {
@@ -1144,7 +1144,7 @@ class Common {
 			self.new(:$alias, :$query, :$materialized);
 		}
 		multi method COERCE(Map (Name(Any) :$alias, Table(Str) :$table, Bool :$materialized)) {
-			my $query = Select.create(:source($table));
+			my $query = Select.create(:from($table));
 			self.new(:$alias, :$query, :$materialized);
 		}
 		multi method COERCE(Map (Name(Any) :$alias, Query :$query, Bool :$materialized)) {
@@ -1238,7 +1238,7 @@ role Source { ... }
 class Select does Query::Common {
 	has Column::List:D  $.columns is required;
 	has Distinction     $.distinct;
-	has Source          $.source;
+	has Source          $.from;
 	has Conditions      $.where;
 	has GroupBy         $.group-by;
 	has Conditions      $.having;
@@ -1250,8 +1250,8 @@ class Select does Query::Common {
 	has Offset          $.offset;
 	has Locking         $.locking;
 
-	method create(Source(Any) :$source!, Column::List(Any) :$columns = *, Conditions(Any) :$where, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) {
-		Select.new(:$common, :$distinct, :$columns, :$source, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
+	method create(Source(Any) :$from!, Column::List(Any) :$columns = *, Conditions(Any) :$where, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) {
+		Select.new(:$common, :$distinct, :$columns, :$from, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
 	}
 }
 
@@ -1954,7 +1954,7 @@ role Renderer::SQL does Renderer {
 		my @parts = 'SELECT';
 		@parts.append: self.render-distinct($placeholders, $select.distinct) with $select.distinct;
 		@parts.append: self.render-column-expressions($placeholders, $select.columns);
-		@parts.append: self.render-from($placeholders, $select.source);
+		@parts.append: self.render-from($placeholders, $select.from);
 		@parts.append: self.render-conditions($placeholders, $select.where);
 		@parts.append: self.render-group-by($placeholders, $select.group-by, $select.having) with $select.group-by;
 		@parts.append: self.render-compound($placeholders, $select.compound) with $select.compound;
@@ -2178,8 +2178,8 @@ multi submethod BUILD(Str:D :renderer($renderer-name)!, *%arguments) {
 	$!renderer = $renderer.new(|%arguments);
 }
 
-our sub select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) is export(:functions) {
-	Select.new(:$common, :$distinct, :$columns, :$source, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
+our sub select(Source(Any) $from, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common, Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows, Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit(Any) :$limit, Offset(Any) :$offset, Locking(Any) :$locking) is export(:functions) {
+	Select.new(:$common, :$distinct, :$columns, :$from, :$where, :$group-by :$having, :$windows, :$compound, :$order-by, :$limit, :$offset, :$locking);
 }
 
 method select(|args) {
@@ -2397,13 +2397,13 @@ It also takes an optional argument C<:$quoting>, if enabled table and column nam
 
 =begin code :lang<raku>
 
-method select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
+method select(Source(Any) $from, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
 Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows,
 Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit :$limit, Offset :$offset, Locking(Any) :$locking)
 
 =end code
 
-This will generate a C<SELECT> query. It will select C<$columns> from C<$source>, filtering by $conditions.
+This will generate a C<SELECT> query. It will select C<$columns> from C<$from>, filtering by $conditions.
 
 =begin code :lang<raku>
 
@@ -2489,7 +2489,7 @@ This selects from a (usually different) table, and inserts the values into the t
 
 =begin code :lang<raku>
 
-$abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
+$abstract.insert('artists', 'name', { :from<new_artists>, :columns<name> }, :returning(*));
 # INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
 
 =end code
@@ -2695,7 +2695,7 @@ This represents a common table expression. It converts from a pair or a list of 
 
 =begin code :lang<raku>
 
-my Common() $cte = recent => { :source<users>, :columns('name', :count(:count(*)), :group-by(name) };
+my Common() $cte = recent => { :from<users>, :columns('name', :count(:count(*)), :group-by(name) };
 # WITH recent AS (SELECT name, COUNT(*) AS count FROM users GROUP BY name);
 
 =end code
@@ -2914,7 +2914,7 @@ This represents an <IN> expression with list. E.g. C<foo in (1, 2, 3)>.
 =begin item1
 Select(Map) :$exists
 
-This represents an C<EXISTS> expression. E.g. C<\(:exists{ :source<table>, columns<1>, :where{ :id(\(:ident<outer.id>)) }> for C<EXISTS(SELECT 1 FROM table WHERE id = outer.id>.
+This represents an C<EXISTS> expression. E.g. C<\(:exists{ :from<table>, columns<1>, :where{ :id(\(:ident<outer.id>)) }> for C<EXISTS(SELECT 1 FROM table WHERE id = outer.id>.
 =end item1
 
 =begin item1
