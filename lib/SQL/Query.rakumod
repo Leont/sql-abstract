@@ -1,6 +1,6 @@
 use v6.d;
 
-unit class SQL::Query:ver<0.0.6>:auth<zef:leont>;
+unit class SQL::Query:ver<0.0.7>:auth<zef:leont>;
 
 class Delegate {
 	has Str:D $.identifier is required;

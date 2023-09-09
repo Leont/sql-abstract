@@ -12,7 +12,7 @@ Synopsis
 use SQL::Abstract;
 
 my $abstract = SQL::Abstract.new(:placeholders<dbi>);
-my $query = $abstract.select('table', <foo bar>, :id(3));
+my $query = $abstract.select('table', <foo bar>, { :id(3) });
 my $result = $dbh.query($result.sql, $result.arguments);
 
 my $join = { :left<books>, :right<authors>, :using<author_id> };
@@ -37,30 +37,46 @@ Class SQL::Abstract
 
 This is the main class of the module.
 
-### new(:$placeholders!, Bool :$quoting)
+### new(:$renderer!, Bool :$quoting, *%renderer-args)
 
-This creates a new `SQL::Abstract` object. It has one mandatory name argument, `$placeholders`, which takes one of the following values:
+This creates a new `SQL::Abstract` object.
 
-  * `'dbi'`/`SQL::Abstract::Placeholders::DBI`
+It supports at least two named arguments:
 
-    This will use DBI style `(?, ?)` placeholders
+  * `Bool :$quote`
 
-  * `'postgres'`/`SQL::Abstract::Placeholders::Postgres`
+  * `:$renderer`
 
-    This will use Postgres style `($1, $2)` placeholders.
+    This can either be a `Renderer` type-object, or the name of such an object. Valid values include:
 
-It also takes an optional argument `:$quoting`, if enabled table and column names will always be quoted.
+        * `'postgres'`/`SQL::Abstract::Renderer::Postgres`
+
+        * `'sqlite'`/`SQL::Abstract::Renderer::SQLite`
+
+        * `'mysql'`/`SQL::Abstract::Renderer::MySQL`
+
+    The postgres renderer takes an additional argument `:$placeholders`, which takes one of the following values:
+
+        * `'dbi'`/`SQL::Abstract::Placeholders::DBI`
+
+          This will use DBI style `(?, ?)` placeholders
+
+        * `'postgres'`/`SQL::Abstract::Placeholders::Postgres`
+
+          This will use Postgres style `($1, $2)` placeholders.
+
+    It also takes an optional argument `:$quoting`, if enabled table and column names will always be quoted.
 
 select
 ------
 
 ```raku
-method select(Source(Any) $source, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
+method select(Source(Any) $from, Column::List(Any) $columns = *, Conditions(Any) $where?, Common(Any) :$common,
 Distinction(Any) :$distinct, GroupBy(Any) :$group-by, Conditions(Any) :$having, Window::Clauses(Any) :$windows,
 Compound(Pair) :$compound, OrderBy(Any) :$order-by, Limit :$limit, Offset :$offset, Locking(Any) :$locking)
 ```
 
-This will generate a `SELECT` query. It will select `$columns` from `$source`, filtering by $conditions.
+This will generate a `SELECT` query. It will select `$columns` from `$from`, filtering by $conditions.
 
 ```raku
 my $join = { :left<books>, :right<authors>, :using<author_id> };
@@ -131,7 +147,7 @@ Overriding(Str) :$overriding, Conflicts(Any) :$conflicts, Column::List(Any) :$re
 This selects from a (usually different) table, and inserts the values into the table.
 
 ```raku
-$abstract.insert('artists', 'name', { :source<new_artists>, :columns<name> }, :returning(*));
+$abstract.insert('artists', 'name', { :from<new_artists>, :columns<name> }, :returning(*));
 # INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
 ```
 
@@ -343,7 +359,7 @@ SQL::Abstract::Common
 This represents a common table expression. It converts from a pair or a list of pairs, with the keys being the name and the values being either a table name, a select hash or an `SQL::Abstract::Query` object.
 
 ```raku
-my Common() $cte = recent => { :source<users>, :columns('name', :count(:count(*)), :group-by(name) };
+my Common() $cte = recent => { :from<users>, :columns('name', :count(:count(*)), :group-by(name) };
 # WITH recent AS (SELECT name, COUNT(*) AS count FROM users GROUP BY name);
 ```
 
@@ -522,7 +538,7 @@ The second kind takes a single named argument that may or may not contain a valu
 
   * Select(Map) :$exists
 
-    This represents an `EXISTS` expression. E.g. `\(:exists{ :source<table>, columns<1>, :where{ :id(\(:ident<outer.id>)) }` for `EXISTS(SELECT 1 FROM table WHERE id = outer.id`.
+    This represents an `EXISTS` expression. E.g. `\(:exists{ :from<table>, columns<1>, :where{ :id(\(:ident<outer.id>)) }` for `EXISTS(SELECT 1 FROM table WHERE id = outer.id`.
 
   * Select(Map) :$not-exists
 

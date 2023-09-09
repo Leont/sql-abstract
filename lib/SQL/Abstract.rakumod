@@ -1,6 +1,6 @@
 use v6.d;
 
-unit class SQL::Abstract:ver<0.0.6>:auth<zef:leont>;
+unit class SQL::Abstract:ver<0.0.7>:auth<zef:leont>;
 
 use fatal;
 

@@ -1,6 +1,8 @@
 Revision history for SQL-Abstract
 
 {{$NEXT}}
+
+0.0.7  2023-09-09T17:01:45+02:00
     - Split Renderer into Postgres, SQLite and MySQL
     - Eliminate renderer default
     - Make sub not pass the right variable name
