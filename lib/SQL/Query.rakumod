@@ -2,6 +2,14 @@ use v6.d;
 
 unit class SQL::Query:ver<0.0.7>:auth<zef:leont>;
 
+class Delegate::Missing is Exception {
+	has Str:D $.identifier is required;
+
+	method message() {
+		die "No replacement value given for delegate value '$!identifier'"
+	}
+}
+
 class Delegate {
 	has Str:D $.identifier is required;
 	has Any $.default is default(Nil);
@@ -13,7 +21,7 @@ class Delegate {
 		} elsif $!default !=== Nil {
 			$!default;
 		} else {
-			die "No value given for delegate value '$!identifier'"
+			die Delegate::Missing.new(:$!identifier);
 		}
 	}
 }
