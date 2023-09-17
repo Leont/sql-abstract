@@ -1,6 +1,7 @@
 Revision history for SQL-Abstract
 
 {{$NEXT}}
+    - Refactor quoting to handle * correctly
 
 0.0.7  2023-09-09T17:01:45+02:00
     - Split Renderer into Postgres, SQLite and MySQL

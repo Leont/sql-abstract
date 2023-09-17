@@ -103,26 +103,52 @@ multi expand-capture(:literal($) ($payload, *@arguments), *%args) {
 	Literal.new(:$payload, :@arguments, |%args);
 }
 
-class Identifier does Term {
-	has Str @.parts;
+my role Prefixable does Term {
+	method parts(--> List) { ... }
+}
 
+class Identifier does Prefixable {
+	my role Element {
+		has Str:D $.payload is required;
+		method quoted(Bool $quoted) { ... }
+	}
+	class Quotable does Element {
+		method quoted(Bool $quoted) {
+			$quoted || $!payload ~~ /\W/ ?? '"' ~ $!payload.subst('"', '""', :g) ~ '"' !! $!payload;
+		}
+	}
+	class Literal does Element {
+		method quoted(Bool) {
+			return $!payload;
+		}
+	}
+	has Element @.parts;
+
+	multi quote(Str $payload) {
+		Quotable.new(:$payload);
+	}
+	multi quote(Whatever) {
+		Literal.new(:payload<*>);
+	}
 	method new(Cool $name) {
-		my @parts = $name.split('.');
+		my @parts = $name.split('.').map(&quote);
 		self.bless(:@parts);
 	}
-	multi method new-from-list(@parts) {
+	multi method new-from-list(@list) {
+		my @parts = @list.map(&quote);
 		self.bless(:@parts);
 	}
 
-	method concat(Identifier $other) {
-		self.new-from-list([|@!parts, |$other.parts]);
+	method concat(Prefixable $other) {
+		my @parts = |@!parts, |$other.parts;
+		self.bless(:@parts);
 	}
 
-	sub quote(Str $part) {
-		'"' ~ $part.subst('"', '""', :g) ~ '"';
+	method quoted(Bool $quoted) {
+		@!parts.map(*.quoted($quoted)).join('.');
 	}
 	method Str() {
-		@!parts.map(&quote).join('.');
+		self.quoted(True);
 	}
 	method WHICH() {
 		ValueObjAt.new("{ self.WHAT.^name }|{ self }");
@@ -149,10 +175,6 @@ class Expression::Renamed does Expression {
 	method as(Identifier(Any) $alias) {
 		Expression::Renamed.new(:$!source, :$alias);
 	}
-}
-
-multi expand-capture(Bool :$star!) {
-	Identifier.new('*');
 }
 
 role Value::List does Expression {
@@ -187,7 +209,15 @@ multi expand-capture(Identifiers(Any) :$idents!) {
 
 class Function { ... }
 
-class Star does Constant['*'] {}
+class Star does Prefixable does Constant['*'] {
+	method parts() {
+		Identifier::Literal.new(:payload<*>);
+	}
+}
+
+multi expand-capture(Bool :$star!) {
+	Star.new;
+}
 
 class Column::List does Value::List {
 	has Expression:D @.elements is required;
@@ -1607,12 +1637,8 @@ role Renderer::SQL does Renderer {
 		parenthesize-if($result, $parenthesize);
 	}
 
-	method quote-identifier-part(Str $identifier --> Str) {
-		$!quoting || $identifier ~~ /<-[\w\*]>/ ?? '"' ~ $identifier.subst('"', '""', :g) ~ '"' !! $identifier;
-	}
-
 	method render-identifier(Identifier $ident --> Str) {
-		$ident.parts.map({ self.quote-identifier-part($^id) }).join('.');
+		$ident.quoted($!quoting);
 	}
 
 	proto method render-expression(Placeholders $placeholders, Expression $expression, Precedence $outer --> Str) {
@@ -2320,7 +2346,7 @@ SQL::Abstract - Generate SQL from Raku data structures
 
 use SQL::Abstract;
 
-my $abstract = SQL::Abstract.new(:placeholders<dbi>);
+my $abstract = SQL::Abstract.new(:renderer<sqlite>);
 my $query = $abstract.select('table', <foo bar>, { :id(3) });
 my $result = $dbh.query($result.sql, $result.arguments);
 
