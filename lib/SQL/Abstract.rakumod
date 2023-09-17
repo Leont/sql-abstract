@@ -53,11 +53,15 @@ class Literal does Expression {
 }
 
 class Integer does Term {
-	has Int $.value;
+	has Int:D $.value is required;
 
-	multi method COERCE(Int $value) {
+	multi method COERCE(Int:D $value) {
 		self.new(:$value);
 	}
+}
+
+multi expand-capture(Integer(Int:D) :$int) {
+	$int;
 }
 
 class Placeholder does Term {
