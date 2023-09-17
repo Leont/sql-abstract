@@ -64,6 +64,18 @@ multi expand-capture(Integer(Int:D) :$int) {
 	$int;
 }
 
+class String does Term {
+	has Str:D $.value is required;
+
+	multi method COERCE(Str:D $value) {
+		self.new(:$value);
+	}
+}
+
+multi expand-capture(String(Str:D) :$str) {
+	$str;
+}
+
 class Placeholder does Term {
 	has Any $.value;
 
@@ -1661,6 +1673,9 @@ role Renderer::SQL does Renderer {
 	}
 	multi method render-expression(Placeholders $placeholders, Integer $integer, Precedence --> Str) {
 		~$integer.value;
+	}
+	multi method render-expression(Placeholders $placeholders, String $string, Precedence --> Str) {
+		"'" ~ $string.value.subst("'", "''", :g) ~ "'";
 	}
 	multi method render-expression(Placeholders $placeholders, Constant $constant, Precedence --> Str) {
 		~$constant;
