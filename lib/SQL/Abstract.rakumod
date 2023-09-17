@@ -2269,7 +2269,7 @@ our sub binary(Str $operator, Expression $left, Expression $right, *%args) is ex
 }
 
 our sub logical(Str $operator, @elements) is export(:functions) {
-	my $class = $operator.lc eq 'and' ?? Op::And !! $operator.lc eq 'or' ?? Op::Or !! die "No such operator '$operator'";
+	my $class = $operator.lc eq 'and' ?? Op::And !! $operator.lc eq 'or' ?? Op::Or !! die Exception::Input.new("No such operator '$operator'");
 	$class.new(:@elements);
 }
 
