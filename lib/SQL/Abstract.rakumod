@@ -2105,10 +2105,6 @@ role Renderer::Sensible does Renderer::SQL {
 		(@common, 'UPDATE', @target, 'SET', @set, @from, @where, @returning).flat.join(' ');
 	}
 
-	method render-overriding(Overriding $override) {
-		'OVERRIDING', $override.uc, 'VALUE';
-	}
-
 	multi method render-conflict-target(Placeholders $placeholders, Conflict::Target::Columns $target) {
 		my $columns = self.render-identifiers($target.columns);
 		my @where = self.render-conditions($placeholders, $target.where);
@@ -2150,10 +2146,18 @@ role Renderer::Sensible does Renderer::SQL {
 
 class Renderer::Postgres does Renderer::Sensible {
 	has Placeholders $.placeholders is required where $_ === any(Placeholders::DBI, Placeholders::Postgres);
+
+	method render-overriding(Overriding $override) {
+		'OVERRIDING', $override.uc, 'VALUE';
+	}
 }
 
 class Renderer::SQLite does Renderer::Sensible {
 	has Placeholders $.placeholders where $_ === any(Placeholders::DBI, Placeholders::Postgres) = Placeholders::DBI;
+
+	method render-overriding(Overriding $override) {
+		Empty;
+	}
 }
 
 class Renderer::MySQL does Renderer::SQL {
