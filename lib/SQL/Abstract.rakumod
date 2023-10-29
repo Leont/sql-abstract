@@ -198,9 +198,15 @@ role Value::List does Expression {
 
 	method elements() { ... }
 
-	multi method merge(::?CLASS $other) {
-		my @elements = |self.elements, |$other.elements:
-		self.new(:@elements);
+	multi method merge(::?CLASS:D: ::?CLASS:D $other) {
+		my @elements = flat self.elements, $other.elements;
+		self.bless(:@elements);
+	}
+	multi method merge(::?CLASS:U: ::?CLASS:D $other) {
+		self.bless(:elements($other.elements));
+	}
+	multi method merge(::?CLASS: ::?CLASS:U $other) {
+		self;
 	}
 }
 
@@ -296,6 +302,11 @@ class Row does Value::List {
 		my Expression @elements = @values.map(&expand-expression);
 		self.new(:@elements);
 	}
+
+	method add-columns(Expression @columns) {
+		my @elements = flat @!elements, @columns;
+		self.new(:@elements);
+	}
 }
 
 multi expand-capture(Row(List) :$row!) {
@@ -307,6 +318,11 @@ class Rows {
 
 	multi method COERCE(@input) {
 		my Row(Any) @elements = @input;
+		self.new(:@elements);
+	}
+
+	method add-columns(Expression @columns) {
+		my @elements = @!elements.map(*.add-columns(@columns));
 		self.new(:@elements);
 	}
 }
@@ -1144,6 +1160,10 @@ role Query does Expression {
 	method as-source(Identifier:D(Any:D) $alias, Bool :$lateral) {
 		Source::Query.new(:query(self), :$alias, :$lateral);
 	}
+
+	method but(%args) {
+		self.new(|self.Capture.hash, |%args);
+	}
 }
 
 class Values does Query {
@@ -1600,17 +1620,20 @@ class Source::Function does Source::Nested {
 	has Bool       $.ordinal;
 }
 
-role Proxy does Expression {
-	method expression(--> Expression) { ... }
+my role Query::Proxy does Expression {
+	method query(--> Query) { ... }
 
 	method precedence(--> Precedence) {
-		self.expression.precedence;
+		self.query.precedence;
 	}
 	method negate(--> Expression) {
-		self.expression.negate;
+		self.query.negate;
 	}
 	method as(Identifier(Any) $alias) {
-		self.expression.as($alias);
+		self.query.as($alias);
+	}
+	method as-source(Identifier:D(Any:D) $alias, Bool :$lateral) {
+		self.query.as-source($alias, :$lateral);
 	}
 }
 
@@ -1622,8 +1645,13 @@ role Exception is ::Exception {
 	}
 }
 
+class Builder { ... }
+
 role Renderer {
 	method render() { ... }
+	method builder() {
+		Builder.new(:renderer(self));
+	}
 }
 
 role Renderer::SQL { ... }
@@ -1661,9 +1689,8 @@ role Renderer::SQL does Renderer {
 		my $result = {*};
 		parenthesize-if($result, $outer > $expression.precedence);
 	}
-	multi method render-expression(Placeholders $placeholders, Proxy $proxy, Precedence $precedence --> Str) {
-		my $expression = $proxy.expression;
-		self.render-expression($placeholders, $expression, $precedence);
+	multi method render-expression(Placeholders $placeholders, Query::Proxy $proxy, Precedence $precedence --> Str) {
+		self.render-query($placeholders, $proxy.query, $precedence);
 	}
 	multi method render-expression(Placeholders $placeholders, Literal $literal, Precedence --> Str) {
 		$literal.payload.subst(/ <!after '\\'> '?'/, { $placeholders.bind($literal.arguments.shift) }, :g);
@@ -2357,6 +2384,231 @@ my package EXPORT::functions {
 	our &delegate-pairs = &SQL::Query::delegate-pairs;
 }
 
+role Builder::Query does Query::Proxy {
+	has Renderer:D $.renderer is required;
+	method query { ... }
+	method expression { self.query }
+
+	method build() {
+		$!renderer.render(self.expression);
+	}
+}
+
+class Builder::Update does Builder::Query {
+	has Update:D $.query is required;
+
+	method from(Update::From(Any) $from) {
+		my $query = $!query.but({ :$from });
+		self.bless(:$!renderer, :$query);
+	}
+	method where(Conditions(Any) $more-where) {
+		my $where = $!query.where.merge($more-where);
+		my $query = $!query.but({ :$where });
+		self.bless(:$!renderer, :$query);
+	}
+	method returning(Column::List(Any) $returning) {
+		my $query = $!query.but({ :$returning });
+		self.bless(:$!renderer, :$query);
+	}
+}
+
+class Builder::Insert does Builder::Query {
+	has Insert:D $.query is required;
+
+	method overriding(Overriding(Str) $overriding) {
+		my $query = $!query.but({ :$overriding });
+		self.bless(:$!renderer, :$query);
+	}
+
+	method conflicts(Conflicts(Any) $conflicts) {
+		my $query = $!query.but({ :$conflicts });
+		self.bless(:$!renderer, :$query);
+	}
+
+	method returning(Column::List(Any) $returning) {
+		my $query = $!query.but({ :$returning });
+		self.bless(:$!renderer, :$query);
+	}
+}
+
+class Builder::Select does Builder::Query {
+	has Select:D $.query is required;
+
+	method !but(*%args) {
+		my $query = $!query.but(%args);
+		self.bless(:$!renderer, :$query);
+	}
+
+	method distinct(Distinction(Any) $distinct) {
+		self!but(:$distinct)
+	}
+	method where(Conditions(Any) $more-where) {
+		my $where = $!query.where.merge($more-where);
+		self!but(:$where);
+	}
+	method group-by(GroupBy(Any) $group-by) {
+		self!but(:$group-by);
+	}
+	method having(Conditions(Any) $more-having) {
+		my $having = $!query.having.merge($more-having);
+		self!but(:$having);
+	}
+	method windows(Window::Clauses(Any) $more-windows) {
+		my $windows = $!query.windows.merge($more-windows);
+		self!but(:$windows);
+	}
+	method compound(Compound(Pair) $compound) {
+		self!but(:$compound);
+	}
+	method order-by(OrderBy(Any) $order-by) {
+		self!but(:$order-by);
+	}
+	method limit(Limit(Any) $limit) {
+		self!but(:$limit);
+	}
+	method offset(Offset(Any) $offset) {
+		self!but(:$offset);
+	}
+	method locking(Locking(Any) $locking) {
+		self!but(:$locking);
+	}
+
+	method insert(Table(Any) $target, Identifiers(Any) $columns = Identifiers) {
+		my $common = $!query.common;
+		my $select = $!query.but({:common(Common)});
+		my $query = Insert::Select.new(:$common, :$target, :$columns, :$select);
+		Builder::Insert.new(:$!renderer, :$query);
+	}
+}
+
+class Builder::Delete does Builder::Query {
+	has Delete:D $.query is required;
+
+	method using(Update::From(Any) $using) {
+		my $query = $!query.but({ :$using });
+		self.bless(:$!renderer, :$query);
+	}
+	method where(Column::List(Any) $more-where) {
+		my $where = $!query.where.merge($more-where);
+		my $query = $!query.but({ :$where });
+		self.bless(:$!renderer, :$query);
+	}
+	method returning(Column::List(Any) $returning) {
+		my $query = $!query.but({ :$returning });
+		self.bless(:$!renderer, :$query);
+	}
+}
+
+class Builder::Source {
+	has Renderer:D $.renderer is required;
+	has Source:D $.source is required;
+	has Conditions $.where;
+	has Common $.common;
+
+	method join(|args) {
+		my $source = $!source.join(|args);
+		Builder::Source.new(:$!renderer, :$source, :$!common, :$!where);
+	}
+
+	method where(Conditions(Any) $more-where) {
+		my $where = $!where.merge($more-where);
+		Builder::Source.new(:$!renderer, :$!source, :$!common, :$where);
+	}
+
+	multi method select(Column::List(Any) $columns) {
+		my $query = Select.new(:$!common, :from($!source), :$columns, :$!where);
+		Builder::Select.new(:$!renderer, :$query);
+	}
+	multi method select(*@columns) {
+		my $columns = Column::List.COERCE(@columns);
+		my $query = Select.new(:$!common, :from($!source), :$columns, :$!where);
+		Builder::Select.new(:$!renderer, :$query);
+	}
+
+	my multi split-source(Table $source) {
+		($source, Update::From);
+	}
+	my multi split-source(Join::On $source) {
+		($source.left, Update::From.new(:source($source.right), :conditions($source.on)));
+	}
+	my multi split-source(Join::Using $source) {
+		samewith($source.to-join-on);
+	}
+	my multi split-source(Join::Cross $source) {
+		($source.left, Update::From.new(:source($source.right)));
+	}
+
+	method update(Assigns(Any) $assigns) {
+		my @assignments = $assigns.assignments;
+		my ($target, $from) = split-source($!source);
+		my $query = Update.new(:$!common, :$target, :@assignments, :$from, :$!where);
+		Builder::Update.new(:$!renderer, :$query);
+	}
+
+	my multi extract-where(Conditional:U $where) {
+		Identifiers.new(:elements[]), Array[Expression].new;
+	}
+	my multi extract-where(Conditional:D $where) {
+		my (@identifiers, Expression @columns);
+		my @expressions = Op::And.unpack($where.expression);
+		for @expressions -> $expression {
+			if $expression ~~ Op::Equals and $expression.left ~~ Identifier {
+				@identifiers.push($expression.left);
+				@columns.push($expression.right);
+			} else {
+				die Exception::Input('Can\'t do insert with with non-trivial where clause');
+			}
+		}
+
+		Identifiers.new(:elements(@identifiers)), @columns;
+	}
+
+	multi method insert(Identifiers(Any) $main-columns, Rows(List) $main-rows) {
+		my ($extra-identifiers, Expression @extra-values) := extract-where($!where);
+		my $columns = $main-columns.merge($extra-identifiers);
+		my $rows = $main-rows.add-columns(@extra-values);
+		my $query = Insert::Values.new(:$!common, :target($!source), :$columns, :$rows);
+		Builder::Insert.new(:$!renderer, :$query);
+	}
+	multi method insert(Assigns(Any) $values) {
+		samewith($values.keys, [ $values.values, ]);
+	}
+	multi method insert(Identifiers(Any) $columns, Value::Default $) {
+		my $query = Insert::Defaults.new(:$!common, :target($!source), :$columns);
+		Builder::Insert.new(:$!renderer, :$query);
+	}
+
+	method delete() {
+		my ($target, $using) = split-source($!source);
+		my $query = Delete.new(:$target, :$using, :$!where);
+		Builder::Delete.new(:$!renderer, :$query);
+	}
+}
+
+class Builder {
+	has Renderer:D $.renderer is required;
+	has Common $.common;
+
+	multi method new(Renderer::SQL:U :renderer($renderer-class)!, *%arguments) {
+		my $renderer = $renderer-class.new(|%arguments);
+		self.bless(:$renderer);
+	}
+	multi method new(Str:D :renderer($renderer-name)!, *%arguments) {
+		my $renderer-class = renderer-for($renderer-name);
+		my $renderer = $renderer-class.new(|%arguments);
+		self.bless(:$renderer);
+	}
+
+	method with(Common(Any) $with) {
+		my $common = $!common.merge($with);
+		self.new(:$!renderer, :$common);
+	}
+
+	method on(Source(Any) $source) {
+		Builder::Source.new(:$!renderer, :$!common, :$source);
+	}
+}
+
 =begin pod
 
 =head1 Name
@@ -2561,6 +2813,140 @@ $abstract.delete('artists', { :name<Madonna> });
 
 =end code
 
+=head1 Builder Types
+
+Builder objects generate SQL statements using the builder pattern
+
+=begin code :lang<raku>
+
+my $builder = SQL::Abstract::Builder(:renderer<sqlite>);
+my $query = $builder.on('table').where({ :1a, :b<bar> }).update({ :$b }).build;
+# "UPDATE table SET b = ? WHERE a = 1 AND b = 'bar'", [ $b ]
+
+=end code
+
+=head2 Builder
+
+=head3 on
+
+=code method on(Source(Any) $name --> Builder::Source)
+
+This will return a source builder for the indicated table or join
+
+=head3 with
+
+=code method with(Common(Any) $cte --> Builder)
+
+This returns a new C<Builder> object with common table expressions injected into it.
+
+=head2 Builder::Source
+
+=head3 select
+
+=begin code :lang<raku>
+
+multi method select(Column::List(Any) $columns --> Builder::Select)
+multi method select(*@columns --> Builder::Select)
+
+=end code
+
+This returns a select builder with the given columns.
+
+=head3 insert
+
+=begin code :lang<raku>
+
+multi method insert(Assigns(Any) $values)
+multi method insert(Identifiers(Any) $main-columns, Rows(List) $main-rows)
+multi method insert(Identifiers(Any) $columns, Value::Default $)
+
+=end code
+
+This returns a select builder with the given values.
+
+=begin code :lang<raku>
+
+$builder.insert({ :1a, :b<foo>, :c(Nil) }).build
+
+=end code
+
+=head3 update
+
+=code method update(Assigns(Any) $assigns --> Builder::Update)
+
+This returns a select builder with the given assignments.
+
+=begin code :lang<raku>
+
+$builder.on('table').where({ :1a }).update({ :2a })
+$builder.on('table').update({ :2a }).where({ :1a })
+
+=end code
+
+=head3 delete
+
+=code method delete(--> Builder::Delete)
+
+This return a new delete builder for the given table
+
+=head3 join
+
+=begin code :lang<raku>
+
+method join(Source(Any) $source, Join::Conditions() :$on)
+method join(Source(Any) $source, Identifiers() :$using)
+method join(Source(Any) $source, Bool :$natural)
+method join(Source(Any) $source, Bool :$cross)
+
+=end code
+
+Join the target to another table.
+
+=begin code :lang<raku>
+
+$on.join('Bar', :using<id>);
+$on.join('Bar', :on{ 'Foo.id' => 'Bar.foo_id' });
+
+=end code
+
+=head3 where
+
+=code method where(Conditions(Any) $where --> Builder::On)
+
+This adds a condition to the subsequent operation, or if it's an insert operation adds those values if possible.
+
+=head2 Builder::Select
+
+=item method distinct(Distinction(Any) $distinct --> Builder::Select)
+=item method where(Conditions(Any) $where --> Builder::Select)
+=item method group-by(GroupBy(Any) $group-by --> Builder::Select)
+=item method having(Conditions(Any) $having --> Builder::Select)
+=item method windows(Window::Clauses(Any) $windows --> Builder::Select)
+=item method compound(Compound(Pair) $compound --> Builder::Select)
+=item method order-by(OrderBy(Any) $order-by --> Builder::Select)
+=item method limit(Limit(Any) $limit --> Builder::Select)
+=item method offset(Offset(Any) $offset --> Builder::Select)
+=item method locking(Locking(Any) $locking --> Builder::Select)
+=item method insert(Table(Any) $target, Identifiers(Any) $columns? --> Builder::Insert)
+
+=head2 Builder::Insert
+
+=item method overriding(Overriding(Str) $overriding --> Builder::Insert)
+=item method conflicts(Conflicts(Any) $conflicts --> Builder::Insert)
+=item method returning(Column::List(Any) $returning --> Builder::Insert)
+
+=head2 Builder::Update
+
+=item method from(Update::From(Any) $from --> Builder::Update)
+=item method where(Conditions(Any) $where --> Builder::Update)
+=item method returning(Column::List(Any) $returning --> Builder::Update)
+
+=head2 Builder::Delete
+
+=item method using(Update::From(Any) $using --> Builder::Delete)
+=item method where(Column::List(Any) $where --> Builder::Delete)
+=item method returning(Column::List(Any) $returning --> Builder::Delete)
+
 =head1 Helper types
 
 SQL::Abstract uses various helper types that will generally coerce from basic datastructures:
@@ -2619,7 +3005,7 @@ Map
 This will join two `Source`s, named C<left> and C<right>, it requires one of the following entries to join them on:
 
 =item3 Join::Conditions() :$on
-=item3 Identifiers() :$conditions
+=item3 Identifiers() :$using
 =item3 Bool :$natural
 =item3 Bool :$cross
 

@@ -11,7 +11,8 @@ my $result1 = result('SELECT * FROM foo', [1, 2, 3]);
 is $result1.sql, 'SELECT * FROM foo';
 is +$result1.arguments, 3;
 
-my $abstract = SQL::Abstract.new(:renderer<postgres>, :placeholders<postgres>);
+my $renderer = SQL::Abstract::Renderer::Postgres.new(:placeholders<postgres>);
+my $abstract = SQL::Abstract.new(:$renderer);
 
 my $select-simple1 = $abstract.select('my_table');
 
@@ -324,6 +325,46 @@ is-deeply $delete5, result('DELETE FROM my_table USING baz WHERE CURRENT OF curs
 my $values1 = $abstract.values([[1, 2],], :1limit);
 is-deeply $values1, result('VALUES ($1, $2) LIMIT $3', [1, 2, 1]);
 
+
+my $builder = $renderer.builder;
+my $on = $builder.on('my_table');
+
+my $build1 = $on.select(*).build;
+is-deeply $build1, result('SELECT * FROM my_table', []);
+
+my $build2 = $on.select(<bar baz>).build;
+is-deeply $build2 , result('SELECT bar, baz FROM my_table', []);
+
+my $build3 = $on.where({ :foo(\(:null)) }).select(<bar baz>).build;
+is-deeply $build3, result('SELECT bar, baz FROM my_table WHERE foo IS NULL', []);
+
+my $build4 = $on.where({ :foo(\(:null)) }).select(<bar baz>).where({ :1a }).build;
+is-deeply $build4, result('SELECT bar, baz FROM my_table WHERE foo IS NULL AND a = $1', [1]);
+
+my $build5 = $on.update({ :1a, :b<foo> }).build;
+is-deeply $build5, result('UPDATE my_table SET a = $1, b = $2', [1, 'foo']);
+
+my $build6 = $on.where({ :42c }).update({ :1a, :b<foo> }).build;
+is-deeply $build6, result('UPDATE my_table SET a = $1, b = $2 WHERE c = $3', [1, 'foo', 42]);
+
+my $build7 = $on.join('other_table', :using<id>).update({ :1a, :b<foo> }).build;
+is-deeply $build7, result('UPDATE my_table SET a = $1, b = $2 FROM other_table WHERE my_table.id = other_table.id', [1, 'foo']);
+
+my $build8 = $on.insert({ :1a, :b<foo> }).build;
+is-deeply $build8, result('INSERT INTO my_table (a, b) VALUES ($1, $2)', [1, 'foo']);
+
+my $build9 = $on.where({ :3c }).insert({ :1a, :b<foo> }).build;
+is-deeply $build9, result('INSERT INTO my_table (a, b, c) VALUES ($1, $2, $3)', [1, 'foo', 3]);
+
+my $build10 = $on.where({ :1a }).delete.build;
+is-deeply $build10, result('DELETE FROM my_table WHERE a = $1', [1]);
+
+my $build11 = $on.join('other_table', :using<id>).delete.build;
+is-deeply $build11, result('DELETE FROM my_table USING other_table WHERE my_table.id = other_table.id');
+
+my $build12a = $on.select(*).query;
+my $build12 = $builder.with([ a => $build12a ]).on('other_table').join('a', :using<id>).select('foo').build;
+is-deeply $build12, result('WITH a AS (SELECT * FROM my_table) SELECT foo FROM other_table INNER JOIN a USING (id)');
 
 
 my $prepared1 = result('', [1, 2, 3]);
