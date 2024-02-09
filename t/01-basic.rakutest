@@ -275,6 +275,16 @@ my $insert12 = $abstract.insert('my_table', { bar => \(:default), baz => 43 });
 is-deeply $insert12, result('INSERT INTO my_table (bar, baz) VALUES (DEFAULT, $1)', [43]);
 
 
+my $upsert1 = $abstract.upsert('my_table', { bar => 1, baz => 43 }, ['bar']);
+is-deeply $upsert1, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT (bar) DO UPDATE SET baz = $3', [1, 43, 43]);
+
+my $upsert2 = $abstract.upsert('my_table', { bar => 1, baz => 42 }, ['bar'], :returning<bar baz>);
+is-deeply $upsert2, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT (bar) DO UPDATE SET baz = $3 RETURNING bar, baz', [1, 42, 42]);
+
+my $upsert3 = $abstract.upsert('my_table', { bar => 1 }, ['bar']);
+is-deeply $upsert3, result('INSERT INTO my_table (bar) VALUES ($1) ON CONFLICT (bar) DO NOTHING', [1]);
+
+
 my $update1 = $abstract.update('my_table', { bar => 1, baz => 42 });
 is-deeply $update1, result('UPDATE my_table SET bar = $1, baz = $2', [1, 42]);
 
@@ -365,6 +375,9 @@ is-deeply $build11, result('DELETE FROM my_table USING other_table WHERE my_tabl
 my $build12a = $on.select(*).query;
 my $build12 = $builder.with([ a => $build12a ]).on('other_table').join('a', :using<id>).select('foo').build;
 is-deeply $build12, result('WITH a AS (SELECT * FROM my_table) SELECT foo FROM other_table INNER JOIN a USING (id)');
+
+my $build13 = $on.upsert({ bar => 1, baz => 43 }, ['bar']).build;
+is-deeply $build13, result('INSERT INTO my_table (bar, baz) VALUES ($1, $2) ON CONFLICT (bar) DO UPDATE SET baz = $3', [1, 43, 43]);
 
 
 my $prepared1 = result('', [1, 2, 3]);

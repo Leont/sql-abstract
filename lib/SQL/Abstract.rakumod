@@ -920,6 +920,20 @@ class Assigns {
 	method values() {
 		@!pairs.map(*.value);
 	}
+	method empty() {
+		not @!pairs;
+	}
+
+	method merge(Assigns $other) {
+		my @pairs = |@!pairs, |$other.pairs;
+		self.new(:@pairs);
+	}
+
+	method without(Identifiers $exclude) {
+		my $none = none($exclude.elements);
+		my @pairs = @!pairs.grep: -> (:$key, :$value) { $key === $none };
+		self.new(:@pairs);
+	}
 }
 
 enum Quantifier (:All<all> :Distinct<distinct>);
@@ -1381,6 +1395,18 @@ class Conflict::Target::Constraint does Conflict::Target {
 	has Identifier:D $.constraint is required;
 }
 
+class Conflict::Targets {
+	has Conflict::Target @.targets;
+
+	multi method COERCE(@specs) {
+		my Conflict::Target(Any) @targets = @specs;
+		self.new(:@targets);
+	}
+	multi method COERCE(Conflict::Target(Any) $conflict) {
+		self.new(:targets[ $conflict ]);
+	}
+}
+
 class Conflict::Nothing { ... }
 
 class Conflict::Update { ... }
@@ -1395,15 +1421,13 @@ role Conflict {
 		Conflict::Noting.new(:target($key));
 	}
 	multi method COERCE(Pair (Conflict::Target(Any) :$key, Assigns(Any) :$value)) {
-		my @assignments = $value.assignments;
-		Conflict::Update.new(:target($key), :@assignments);
+		Conflict::Update.new(:target($key), :assignments($value));
 	}
 	multi method COERCE(Map (Conflict::Target(Any) :$target?, Str :$do! where 'nothing')) {
 		Conflict::Nothing.new(:$target);
 	}
 	multi method COERCE(Map (Conflict::Target(Any) :$target!, Assigns(Any) :$do!, Conditions(Any) :$where)) {
-		my @assignments = $do.assignments;
-		Conflict::Update.new(:$target, :@assignments, :$where);
+		Conflict::Update.new(:$target, :assignments($do), :$where);
 	}
 }
 
@@ -1412,6 +1436,10 @@ class Conflict::Nothing does Conflict {}
 class Conflict::Update does Conflict {
 	has Op::Assign @.assignments;
 	has Conditions $.where;
+
+	submethod BUILD(Conflict::Target :$!target!, Assigns :$assignments!, Conditions :$!where) {
+		@!assignments = $assignments.assignments;
+	}
 }
 
 class Conflicts {
@@ -2289,6 +2317,20 @@ method insert(|args) {
 	$!renderer.render(insert(|args));
 }
 
+our sub upsert(Table(Any) $target, Assigns(Any) $assigns, Conflict::Targets(Cool) $targets, Common(Any) :$common, Overriding(Str) :$overriding, Column::List(Any) :$returning) is export(:functions) {
+	my Conflicts(Seq) $conflicts = $targets.targets.map: -> Conflict::Target::Columns $target {
+		my $assignments = $assigns.without($target.columns);
+		$assignments.empty ?? Conflict::Nothing.new(:$target) !! Conflict::Update.new(:$target, :$assignments);
+	}
+	my $columns = Identifiers.COERCE($assigns.keys);
+	my $rows = Rows.COERCE([ $assigns.values, ]);
+	Insert::Values.new(:$common, :$target, :$columns, :$rows, :$conflicts, :$overriding :$returning);
+}
+
+method upsert(|args) {
+	$!renderer.render(upsert(|args));
+}
+
 our sub delete(Table(Any) $target, Conditions(Any) $where, Common(Any) :$common, Update::From(Any) :$using, Column::List(Any) :$returning) is export(:functions) {
 	Delete.new(:$common, :$target, :$where, :$using, :$returning);
 }
@@ -2578,6 +2620,18 @@ class Builder::Source {
 		Builder::Insert.new(:$!renderer, :$query);
 	}
 
+	method upsert(Assigns(Any) $assigns is copy, Conflict::Targets(Cool) $targets) {
+		my ($extra-identifiers, Expression @extra-values) := extract-where($!where);
+		if (@extra-values) {
+			my @pairs = $extra-identifiers.elements Z=> @extra-values;
+			my $extra-assigns = Assigns.COERCE(@pairs);
+			$assigns = $extra-assigns.merge($assigns);
+		}
+
+		my $query = upsert($!source, $assigns, $targets, :$!common);
+		Builder::Insert.new(:$!renderer, :$query);
+	}
+
 	method delete() {
 		my ($target, $using) = split-source($!source);
 		my $query = Delete.new(:$target, :$using, :$!where);
@@ -2795,6 +2849,24 @@ $abstract.insert('artists', 'name', { :from<new_artists>, :columns<name> }, :ret
 
 =end code
 
+=head2 upsert
+
+=begin code :lang<raku>
+
+method upsert(Table(Any) $target, Assigns(Any) $values, Conflict::Targets $targets, Common(Any) :$common,
+Overriding(Str) :$overriding, Column::List(Any) :$returning)
+
+=end code
+
+This upserts data into the table: it tries to insert data but if it fails because of a unique index constraint on one of C<$targets> it will update the other columns instead.
+
+=begin code :lang<raku>
+
+$abstract.upsert('phone_numbers', { :$name, :$number}, ['name']);
+# INSERT INTO phone_numbers (name, number) VALUES (?, ?) ON CONFLICT (name) UPDATE number = ?
+
+=end
+
 =head2 delete
 
 =begin code :lang<raku>
@@ -2888,6 +2960,12 @@ $builder.on('table').update({ :2a }).where({ :1a })
 =code method delete(--> Builder::Delete)
 
 This return a new delete builder for the given table
+
+=head3 upsert
+
+=code method upsert(Assigns $assigns, Conflict::Targets $targets --> Builder::Insert)
+
+This returns a new insert builder with an upsert clause.
 
 =head3 join
 
