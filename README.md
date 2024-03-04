@@ -11,7 +11,7 @@ Synopsis
 ```raku
 use SQL::Abstract;
 
-my $abstract = SQL::Abstract.new(:placeholders<dbi>);
+my $abstract = SQL::Abstract.new(:renderer<sqlite>);
 my $query = $abstract.select('table', <foo bar>, { :id(3) });
 my $result = $dbh.query($result.sql, $result.arguments);
 
@@ -151,10 +151,26 @@ $abstract.insert('artists', 'name', { :from<new_artists>, :columns<name> }, :ret
 # INSERT INTO artists (name) SELECT name FROM new_artists RETURNING *
 ```
 
-delete
+upsert
 ------
 
 ```raku
+method upsert(Table(Any) $target, Assigns(Any) $values, Conflict::Targets $targets, Common(Any) :$common,
+Overriding(Str) :$overriding, Column::List(Any) :$returning)
+```
+
+This upserts data into the table: it tries to insert data but if it fails because of a unique index constraint on one of `$targets` it will update the other columns instead.
+
+```raku
+$abstract.upsert('phone_numbers', { :$name, :$number}, ['name']);
+# INSERT INTO phone_numbers (name, number) VALUES (?, ?) ON CONFLICT (name) UPDATE number = ?
+
+=end
+
+=head2 delete
+
+=begin code :lang<raku>
+
 method delete(Table(Any) $target, Conditions(Any) $where, Common(Any) :$common,
 Source(Any) :$using, Column::List(Any) :$returning)
 ```
@@ -165,6 +181,155 @@ This deletes rows from the database, optionally returning their values.
 $abstract.delete('artists', { :name<Madonna> });
 # DELETE FROM artists WHERE name = 'Madonna'
 ```
+
+Builder Types
+=============
+
+Builder objects generate SQL statements using the builder pattern
+
+```raku
+my $builder = SQL::Abstract::Builder(:renderer<sqlite>);
+my $query = $builder.on('table').where({ :1a, :b<bar> }).update({ :$b }).build;
+# "UPDATE table SET b = ? WHERE a = 1 AND b = 'bar'", [ $b ]
+```
+
+Builder
+-------
+
+### on
+
+    method on(Source(Any) $name --> Builder::Source)
+
+This will return a source builder for the indicated table or join
+
+### with
+
+    method with(Common(Any) $cte --> Builder)
+
+This returns a new `Builder` object with common table expressions injected into it.
+
+Builder::Source
+---------------
+
+### select
+
+```raku
+multi method select(Column::List(Any) $columns --> Builder::Select)
+multi method select(*@columns --> Builder::Select)
+```
+
+This returns a select builder with the given columns.
+
+### insert
+
+```raku
+multi method insert(Assigns(Any) $values)
+multi method insert(Identifiers(Any) $main-columns, Rows(List) $main-rows)
+multi method insert(Identifiers(Any) $columns, Value::Default $)
+```
+
+This returns a select builder with the given values.
+
+```raku
+$builder.insert({ :1a, :b<foo>, :c(Nil) }).build
+```
+
+### update
+
+    method update(Assigns(Any) $assigns --> Builder::Update)
+
+This returns a select builder with the given assignments.
+
+```raku
+$builder.on('table').where({ :1a }).update({ :2a })
+$builder.on('table').update({ :2a }).where({ :1a })
+```
+
+### delete
+
+    method delete(--> Builder::Delete)
+
+This return a new delete builder for the given table
+
+### upsert
+
+    method upsert(Assigns $assigns, Conflict::Targets $targets --> Builder::Insert)
+
+This returns a new insert builder with an upsert clause.
+
+### join
+
+```raku
+method join(Source(Any) $source, Join::Conditions() :$on)
+method join(Source(Any) $source, Identifiers() :$using)
+method join(Source(Any) $source, Bool :$natural)
+method join(Source(Any) $source, Bool :$cross)
+```
+
+Join the target to another table.
+
+```raku
+$on.join('Bar', :using<id>);
+$on.join('Bar', :on{ 'Foo.id' => 'Bar.foo_id' });
+```
+
+### where
+
+    method where(Conditions(Any) $where --> Builder::On)
+
+This adds a condition to the subsequent operation, or if it's an insert operation adds those values if possible.
+
+Builder::Select
+---------------
+
+  * method distinct(Distinction(Any) $distinct --> Builder::Select)
+
+  * method where(Conditions(Any) $where --> Builder::Select)
+
+  * method group-by(GroupBy(Any) $group-by --> Builder::Select)
+
+  * method having(Conditions(Any) $having --> Builder::Select)
+
+  * method windows(Window::Clauses(Any) $windows --> Builder::Select)
+
+  * method compound(Compound(Pair) $compound --> Builder::Select)
+
+  * method order-by(OrderBy(Any) $order-by --> Builder::Select)
+
+  * method limit(Limit(Any) $limit --> Builder::Select)
+
+  * method offset(Offset(Any) $offset --> Builder::Select)
+
+  * method locking(Locking(Any) $locking --> Builder::Select)
+
+  * method insert(Table(Any) $target, Identifiers(Any) $columns? --> Builder::Insert)
+
+Builder::Insert
+---------------
+
+  * method overriding(Overriding(Str) $overriding --> Builder::Insert)
+
+  * method conflicts(Conflicts(Any) $conflicts --> Builder::Insert)
+
+  * method returning(Column::List(Any) $returning --> Builder::Insert)
+
+Builder::Update
+---------------
+
+  * method from(Update::From(Any) $from --> Builder::Update)
+
+  * method where(Conditions(Any) $where --> Builder::Update)
+
+  * method returning(Column::List(Any) $returning --> Builder::Update)
+
+Builder::Delete
+---------------
+
+  * method using(Update::From(Any) $using --> Builder::Delete)
+
+  * method where(Column::List(Any) $where --> Builder::Delete)
+
+  * method returning(Column::List(Any) $returning --> Builder::Delete)
 
 Helper types
 ============
@@ -216,7 +381,7 @@ A source is source of data, usually a table or a join. If not passed as a `Sourc
 
           * Join::Conditions() :$on
 
-          * Identifiers() :$conditions
+          * Identifiers() :$using
 
           * Bool :$natural
 
