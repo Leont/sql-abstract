@@ -2221,7 +2221,7 @@ class Renderer::MySQL does Renderer::SQL {
 	multi method render-expression(Placeholders $placeholders, Update $update, Precedence --> Str) {
 		my @common       = self.render-common-tables($placeholders, $update.common);
 		my $target       = $update.from ?? $update.target.join($update.from.source, :on($update.from.conditions)) !! $update.target;
-		my @target       = self.render-source($target);
+		my @target       = self.render-source($placeholders, $target);
 		my @set          = self.render-expressions($placeholders, $update.assignments);
 		my @where        = self.render-conditions($placeholders, $update.where);
 		die Exception::Portability.new("MySQL doesn't support RETURNING clause on UPDATE") if $update.returning;
